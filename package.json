@@ -1,0 +1,24 @@
+{
+  "name": "60-days-agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "用 TypeScript，从第一行代码到上线一个 Agent 产品",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "imports": {
+    "#testing": "./shared/testing/index.ts"
+  },
+  "scripts": {
+    "check": "node scripts/check.ts",
+    "test": "node scripts/check.ts all --solution",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
