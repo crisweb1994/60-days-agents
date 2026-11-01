@@ -45,6 +45,24 @@ describeMock('第 1 天：会查术语表的 Agent', () => {
     });
     expect(messages.at(-1)?.content, '交回模型的应该是 lookupTerm 查到的定义').toContain('Model Context Protocol');
   });
+
+  test('模型一次返回多个工具调用时，每个都要执行并交回结果', async () => {
+    llm
+      .reply({
+        toolCalls: [
+          { id: 'call_agent', name: 'lookup_term', arguments: { term: 'Agent' } },
+          { id: 'call_mcp', name: 'lookup_term', arguments: { term: 'MCP' } },
+        ],
+      })
+      .reply({ content: '两个术语都查到了。' });
+
+    expect(await runAgent('Agent 和 MCP 分别是什么？')).toBe('两个术语都查到了。');
+    const toolMessages = llm.requests[1].messages.filter((m) => m.role === 'tool');
+    expect(
+      toolMessages.map((m) => m.tool_call_id),
+      '每个工具调用都要有一条对应的 tool 消息',
+    ).toEqual(['call_agent', 'call_mcp']);
+  });
 });
 
 describeE2E('第 1 天：真实模型', () => {
