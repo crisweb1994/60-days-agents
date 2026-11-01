@@ -1,0 +1,66 @@
+// 和模型交换的数据：消息、工具定义、一次请求和一次回复。
+import type { Usage } from './usage.ts';
+
+export type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
+
+export type AssistantMessage = {
+  role: 'assistant';
+  content: string | null;
+  tool_calls?: ToolCall[];
+  /** 推理模型的思考内容。DeepSeek、通义千问、GLM、Kimi 都用这个字段名 */
+  reasoning_content?: string;
+};
+
+export type Message =
+  | { role: 'system' | 'user'; content: string }
+  | AssistantMessage
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+export type ToolDefinition = {
+  type: 'function';
+  function: { name: string; description?: string; parameters: object };
+};
+
+/** 让模型按什么格式输出。字段和接口的写法一致 */
+export type ResponseFormat =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | { type: 'json_schema'; json_schema: { name: string; schema: object; strict?: boolean } };
+
+/** 模型要不要调用工具：auto 由它决定，none 不调用，required 必须调用，也可以指定某个工具 */
+export type ToolChoice = 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+
+/** 一次请求。采样参数都是可选的：不传，就用模型服务的默认值 */
+export interface ChatRequest {
+  messages: Message[];
+  tools?: ToolDefinition[];
+  toolChoice?: ToolChoice;
+  /** 输出格式：JSON 模式或 JSON Schema 约束（第 4 天） */
+  responseFormat?: ResponseFormat;
+  /** 随机程度，越低越稳定。各家的取值范围不一样，有的模型不让改 */
+  temperature?: number;
+  /** 核采样，一般和 temperature 只调一个 */
+  topP?: number;
+  /** 这次最多输出多少 token。超出就截断，finish_reason 为 length */
+  maxTokens?: number;
+  /** 生成到这些字符串时停止 */
+  stop?: string[];
+}
+
+/** 一次回复 */
+export interface ChatResult {
+  message: AssistantMessage;
+  /** 模型为什么停下：stop、length、tool_calls……第 6 天细讲 */
+  finishReason: string;
+  usage: Usage;
+}
+
+/** 调用模型时的回调和取消信号 */
+export interface ChatOptions {
+  /** 模型每生成一段文字，就回调一次，拿到的是新增的部分 */
+  onText?: (text: string) => void;
+  /** 推理模型每生成一段思考内容，就回调一次 */
+  onReasoning?: (text: string) => void;
+  /** 用来取消请求，比如用户按了 Ctrl+C */
+  signal?: AbortSignal;
+}

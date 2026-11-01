@@ -11,7 +11,10 @@ const USAGE = `用法：
   npm run check <天数> -- --solution   测参考答案
   npm run check all -- --solution      测所有天的参考答案（写课和 CI 用）`;
 
-const MODEL_ENV = ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL'];
+const OPENAI_ENV = ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL'];
+// 第 8 天起还要用到 Anthropic 兼容接口
+const ANTHROPIC_ENV = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'];
+const MODEL_ENV = [...OPENAI_ENV, ...ANTHROPIC_ENV];
 const root = join(import.meta.dirname, '..');
 
 function exit(message: string): never {
@@ -42,6 +45,7 @@ const days = readdirSync(join(root, 'days'))
   .sort();
 let filter: string | undefined; // 交给 vitest 的路径过滤；all 时不过滤，连 shared/ 里的测试一起跑
 let label: string;
+let needsAnthropic = true; // e2e 模式下要不要检查 ANTHROPIC_* 配置
 if (day === 'all') {
   label = '所有天';
 } else {
@@ -53,12 +57,13 @@ if (day === 'all') {
   }
   filter = `days/${dir}/`;
   label = `第 ${n} 天`;
+  needsAnthropic = n >= 8;
 }
 
 if (values.e2e) {
   const envFile = join(root, '.env');
   if (existsSync(envFile)) process.loadEnvFile(envFile);
-  const missing = MODEL_ENV.filter((key) => !process.env[key]);
+  const missing = (needsAnthropic ? MODEL_ENV : OPENAI_ENV).filter((key) => !process.env[key]);
   if (missing.length > 0) {
     exit(`e2e 模式要调用真实模型，但缺少这些配置：${missing.join('、')}\n先运行 cp .env.example .env，再把它们填好。`);
   }

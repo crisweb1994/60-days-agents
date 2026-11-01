@@ -2,7 +2,7 @@
 import { afterAll, beforeEach, describe } from 'vitest';
 import { startMockLLM, type MockLLM } from '../mock-llm/index.ts';
 
-export type { ChatMessage, ChatRequest, MockFailure, MockLLM, MockReply } from '../mock-llm/index.ts';
+export type { AnthropicRequest, ChatMessage, ChatRequest, MockFailure, MockLLM, MockReply } from '../mock-llm/index.ts';
 
 /** mock：用本地 mock 模型离线测试；e2e：调用 .env 里配置的真实模型 */
 export const mode: 'mock' | 'e2e' = process.env.CHECK_MODE === 'e2e' ? 'e2e' : 'mock';
@@ -17,7 +17,7 @@ export const describeMock = describe.runIf(mode === 'mock');
 export const describeE2E = describe.runIf(mode === 'e2e');
 
 /**
- * 启动 mock 模型服务器。mock 模式下把 OPENAI_* 环境变量指向它；e2e 模式下保留 .env 里的真实配置。
+ * 启动 mock 模型服务器。mock 模式下把 OPENAI_* 和 ANTHROPIC_* 环境变量指向它；e2e 模式下保留 .env 里的真实配置。
  * 要在 loadTarget 之前调用，这样被测代码在 import 时读到的就已经是正确的配置。
  */
 export async function setupModel(): Promise<MockLLM> {
@@ -26,6 +26,9 @@ export async function setupModel(): Promise<MockLLM> {
     process.env.OPENAI_BASE_URL = llm.baseURL;
     process.env.OPENAI_API_KEY = 'mock-key';
     process.env.OPENAI_MODEL = 'mock-model';
+    process.env.ANTHROPIC_BASE_URL = llm.anthropicBaseURL;
+    process.env.ANTHROPIC_API_KEY = 'mock-key';
+    process.env.ANTHROPIC_MODEL = 'mock-model';
   }
   beforeEach(() => llm.reset());
   afterAll(() => llm.close());

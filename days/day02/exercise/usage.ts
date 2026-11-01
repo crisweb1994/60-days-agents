@@ -1,0 +1,94 @@
+// token 用量和花费。各家返回的 usage 字段不完全一样，先统一成 Usage，再算钱。
+
+export interface Usage {
+  /** 输入 token，包括命中缓存的部分 */
+  inputTokens: number;
+  /** 输入里命中缓存的部分，按更低的单价计费 */
+  cachedTokens: number;
+  /** 输出 token，包括思考的部分 */
+  outputTokens: number;
+  /** 输出里思考的部分，按输出单价计费 */
+  reasoningTokens: number;
+}
+
+/** 接口返回的 usage。字段名以 OpenAI 为准，再加上几家自己的写法 */
+export type RawUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+  completion_tokens_details?: { reasoning_tokens?: number } | null;
+  /** DeepSeek：命中缓存的输入 token */
+  prompt_cache_hit_tokens?: number;
+  /** Kimi 的文档里也写了这个顶层字段 */
+  cached_tokens?: number;
+};
+
+/** 单价，单位是元/百万 token */
+export interface Price {
+  input: number;
+  /** 命中缓存的输入的单价。不填就按 input 算 */
+  cachedInput?: number;
+  output: number;
+}
+
+export function emptyUsage(): Usage {
+  return { inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+}
+
+export function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    cachedTokens: a.cachedTokens + b.cachedTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+  };
+}
+
+/** 把接口返回的 usage 统一成 Usage。没有 usage 时全部算 0 */
+export function parseUsage(raw: RawUsage | null | undefined): Usage {
+  // TODO 4：把接口返回的 usage 转成 Usage。
+  // - inputTokens 来自 prompt_tokens，outputTokens 来自 completion_tokens
+  // - cachedTokens：先看 prompt_tokens_details.cached_tokens，没有再看 DeepSeek 的 prompt_cache_hit_tokens
+  // - reasoningTokens 来自 completion_tokens_details.reasoning_tokens
+  // - 没有的字段算 0；raw 可能是 undefined（有的情况下接口不返回 usage），这时全部算 0
+  return emptyUsage();
+}
+
+/** 算出这些用量花了多少元 */
+export function calcCost(usage: Usage, price: Price): number {
+  // TODO 5：按单价算钱。单价是「元/百万 token」，所以最后要除以 1_000_000。
+  // - 输入分两部分：命中缓存的 cachedTokens 按 price.cachedInput 算（没填就按 price.input），其余按 price.input 算
+  // - 输出全部按 price.output 算。思考的 token 已经包含在 outputTokens 里，不要重复算
+  return 0;
+}
+
+/**
+ * 读取 .env 里的单价。格式是「输入,缓存命中的输入,输出」，单位是元/百万 token，比如 2,0.2,8；
+ * 没有缓存价时也可以只写「输入,输出」。没填就返回 undefined
+ */
+export function parsePrice(text: string | undefined): Price | undefined {
+  if (!text?.trim()) return undefined;
+  const numbers = text.split(',').map((part) => Number(part.trim()));
+  if (![2, 3].includes(numbers.length) || numbers.some((n) => !Number.isFinite(n) || n < 0)) {
+    throw new Error(`单价的格式是「输入,缓存命中的输入,输出」（元/百万 token），比如 2,0.2,8。现在填的是：${text}`);
+  }
+  if (numbers.length === 2) return { input: numbers[0], output: numbers[1] };
+  return { input: numbers[0], cachedInput: numbers[1], output: numbers[2] };
+}
+
+/** 比如：输入 812 tokens（缓存命中 512） · 输出 96 tokens（思考 40） · 0.0015 元（单价 2,0.2,8 时） */
+export function formatUsage(usage: Usage, price?: Price): string {
+  let input = `输入 ${usage.inputTokens} tokens`;
+  if (usage.cachedTokens) input += `（缓存命中 ${usage.cachedTokens}）`;
+  let output = `输出 ${usage.outputTokens} tokens`;
+  if (usage.reasoningTokens) output += `（思考 ${usage.reasoningTokens}）`;
+  const parts = [input, output];
+  if (price) parts.push(formatCost(calcCost(usage, price)));
+  return parts.join(' · ');
+}
+
+function formatCost(cost: number): string {
+  if (cost === 0) return '0 元';
+  if (cost < 0.0001) return '不到 0.0001 元';
+  return `${cost.toFixed(4)} 元`;
+}
