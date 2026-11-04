@@ -359,3 +359,44 @@ describe('Anthropic 协议', () => {
     expect(await anthropicError(res)).toEqual({ type: 'overloaded_error', message: 'Overloaded' });
   });
 });
+
+describe('embedding（第 17 天起）', () => {
+  function embed(body: object) {
+    return fetch(`${llm.baseURL}/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },
+      body: JSON.stringify({ model: 'mock-embedding', ...body }),
+    });
+  }
+  const cosine = (a: number[], b: number[]) => a.reduce((sum, x, i) => sum + x * b[i], 0);
+
+  test('按顺序返回归一化的向量，不消耗脚本', async () => {
+    llm.reply({ content: '留给对话用的' });
+    const res = await embed({ input: ['向量检索', '关键词检索', '今天天气不错'] });
+    const data: any = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.data.map((d: any) => d.index)).toEqual([0, 1, 2]);
+    const [a, b, c] = data.data.map((d: any) => d.embedding as number[]);
+    expect(a).toHaveLength(256);
+    expect(cosine(a, a)).toBeCloseTo(1);
+    expect(cosine(a, b), '字面相近的文本更接近').toBeGreaterThan(cosine(a, c));
+    expect(llm.pending, 'embedding 不用脚本').toBe(1);
+    expect(llm.embeddingRequests).toHaveLength(1);
+  });
+
+  test('同样的文本总是得到同样的向量；支持 dimensions', async () => {
+    const one: any = await (await embed({ input: 'MCP 服务器', dimensions: 64 })).json();
+    const two: any = await (await embed({ input: 'MCP 服务器', dimensions: 64 })).json();
+    expect(one.data[0].embedding).toHaveLength(64);
+    expect(one.data[0].embedding).toEqual(two.data[0].embedding);
+  });
+
+  test('空文本、一次太多条，返回 400 并说明原因', async () => {
+    const empty = await embed({ input: ['有内容', ' '] });
+    expect(empty.status).toBe(400);
+    expect(await errorMessage(empty)).toContain('input[1]');
+    const many = await embed({ input: Array.from({ length: 33 }, (_, i) => `第 ${i} 段`) });
+    expect(many.status).toBe(400);
+    expect(await errorMessage(many)).toContain('分批');
+  });
+});

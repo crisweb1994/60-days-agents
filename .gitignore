@@ -4,3 +4,9 @@ coverage/
 *.log
 .DS_Store
 workspace/
+# 第 13 天起：本机的 MCP 服务器配置，里面可能有路径和令牌
+mcp.json
+# 第 16、17、19 天：研究助手写在工作目录和文档目录里的中间结果、索引、记忆和会话
+.context/
+.rag/
+.mini-agent/

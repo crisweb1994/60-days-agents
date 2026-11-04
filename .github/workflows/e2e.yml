@@ -4,6 +4,7 @@ name: E2E
 # 先在仓库的 Settings → Secrets and variables → Actions 里配置：
 #   变量 OPENAI_BASE_URL、OPENAI_MODEL，密钥 OPENAI_API_KEY
 #   变量 ANTHROPIC_BASE_URL、ANTHROPIC_MODEL，密钥 ANTHROPIC_API_KEY（第 8 天起用到）
+#   变量 EMBEDDING_MODEL，可选的变量 EMBEDDING_BASE_URL 和密钥 EMBEDDING_API_KEY（第 17 天起用到，不配时沿用 OPENAI_*）
 # 没配置 OPENAI_MODEL 之前，这个任务会自动跳过。
 on:
   schedule:
@@ -21,6 +22,9 @@ jobs:
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      EMBEDDING_BASE_URL: ${{ vars.EMBEDDING_BASE_URL }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

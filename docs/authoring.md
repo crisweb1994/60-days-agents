@@ -36,6 +36,26 @@ days/day05/
 | `retry.ts` | 9 | 错误分类和重试 |
 | `session.ts`、`cli.ts` | 10 | 多轮对话和命令行界面 |
 
+## 第二阶段的代码结构
+
+第 11–20 天接着第 10 天的代码，长成研究助手。只在某一天出现的示例文件（第 11 天的文献库和 `bench.ts`）不往后带；`data/` 是 exercise 和 solution 共用的数据，第 18 天起每天都带着：
+
+| 文件 | 从第几天起 | 内容 |
+|---|---|---|
+| `tool.ts` | 11 | 叫错工具名时提示最像的、参数不对时列出要求、`paginate()`；第 12 天加 `body` 和 `footer`，第 13 天加 `parameters`（直接给 JSON Schema） |
+| `data/articles.ts`、`data/tasks.ts`、`tools/library*.ts`、`bench.ts` | 11 | 工具设计的对照实验，只在第 11 天出现 |
+| `html.ts`、`search.ts`、`web.ts` | 12 | 网页清洗、三家搜索 API、`web_search` 和 `fetch_page`、缓存、来源登记 |
+| `mcp.ts` | 13 | MCP host：读配置、连接服务器、转换工具 |
+| `server/` | 14 | 用 SDK v2 写的笔记 MCP 服务器，stdio 和 HTTP 两种部署 |
+| `context.ts`、`prompts.ts` | 15 | 估算 token、按预算组装上下文、缓存统计；研究助手的 system prompt 从第 15 天起放在 `prompts.ts` |
+| `compact.ts` | 16 | 清理工具输出、大结果写入文件、摘要压缩 |
+| `rag/` | 17 | embedding、切分、向量库、增量索引；第 18 天加 BM25、混合检索、重排、改写、grep、评估 |
+| `tools/docs.ts`、`data/docs/`、`data/qa.ts` | 18 | `search_docs`、`grep_docs`、`read_doc`，测试和评估用的文档与问答集 |
+| `memory.ts`、`tools/memory.ts`、`session-store.ts` | 19 | 长期记忆、会话的保存和恢复 |
+| `citations.ts`、`research.ts`、`docs-setup.ts` | 20 | 统一的来源和引用检查，组装研究助手 |
+
+第 13、14 天用到官方的 MCP TypeScript SDK v2（`@modelcontextprotocol/client`、`@modelcontextprotocol/server`），已经写进根目录的 `package.json`。
+
 ## 练习怎么写
 
 - **TODO 编号**：按建议的完成顺序编号，跨文件连续编号。文件开头注明「第 N 天的练习：TODO 几到几在哪里。检查：npm run check N」。
@@ -104,6 +124,10 @@ describeE2E('真实模型', () => {
 - Anthropic 协议：缺少 API Key 返回 401，缺少 `anthropic-version`、`max_tokens`；messages 里出现 system 或 tool 角色；工具定义用了 OpenAI 的写法；工具结果没有放进下一条 user 消息、没排在最前面；带思考的工具调用回复，回传时没有原样带上 `thinking` 块和签名
 - 脚本用完时返回 500，并提示 Agent 可能陷入了循环
 
+第 17 天起它还实现了 OpenAI 兼容的 `…/embeddings`：不用脚本，按文本算出固定的 256 维向量（英文和数字按单词、中文按单字和相邻两字哈希），字面上越像的文本向量越接近。它不懂意思，能测切分、索引、检索的流程，测不了「换一种说法也能找到」，那要靠 e2e。和真实接口一样，空文本和一次超过 32 条都返回 400。收到的请求在 `llm.embeddingRequests` 里；测试里要算同样的向量，从 `#testing` 引入 `mockEmbedding`。`setupModel()` 会把 `EMBEDDING_*` 也指向它。
+
+需要搜索服务、网页、MCP 服务器的测试，在当天的 `tests/` 里起一个本地的假服务（比如第 12 天的 `tests/fixtures.ts`、第 13 天的 `tests/fixtures/notes.ts`）。e2e 模式下也用这些假服务，只把模型换成真的：不需要搜索的 Key，答案也只在假数据里。
+
 ## 讲义怎么写
 
 - **结构**：开头一段说明今天做什么，以及「学完今天，你会」；然后是概念、读懂练习代码、常见误解、常见错误、动手（分步）、检查、小实验、小结、想一想、延伸阅读。篇幅大约在 3500 到 4500 个汉字，另有代码和表格。
@@ -121,4 +145,4 @@ npm run check 5                   # 确认练习的初始状态确实会失败
 npm run check 5 -- --solution     # 只测某一天的参考答案
 ```
 
-CI 会在每次 push 和 PR 时运行类型检查和 `npm test`。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`。
+CI 会在每次 push 和 PR 时运行类型检查和 `npm test`。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`；第 17 天起还要变量 `EMBEDDING_MODEL`（地址和 Key 不配时沿用 `OPENAI_*`）。

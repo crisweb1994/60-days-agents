@@ -15,6 +15,10 @@ const OPENAI_ENV = ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL'];
 // 第 8 天起还要用到 Anthropic 兼容接口
 const ANTHROPIC_ENV = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'];
 const MODEL_ENV = [...OPENAI_ENV, ...ANTHROPIC_ENV];
+// 第 17 天起还要用到 embedding 模型。地址和 Key 没填时沿用 OPENAI_*，模型名必须填
+const EMBEDDING_ENV = ['EMBEDDING_BASE_URL', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL'];
+// 联网搜索的 Key（第 12 天起）。测试用本地的假搜索服务，mock 模式下也不传给测试
+const SEARCH_ENV = ['SEARCH_PROVIDER', 'TAVILY_API_KEY', 'BOCHA_API_KEY', 'BRAVE_API_KEY'];
 const root = join(import.meta.dirname, '..');
 
 function exit(message: string): never {
@@ -46,6 +50,7 @@ const days = readdirSync(join(root, 'days'))
 let filter: string | undefined; // 交给 vitest 的路径过滤；all 时不过滤，连 shared/ 里的测试一起跑
 let label: string;
 let needsAnthropic = true; // e2e 模式下要不要检查 ANTHROPIC_* 配置
+let needsEmbedding = true; // e2e 模式下要不要检查 EMBEDDING_MODEL
 if (day === 'all') {
   label = '所有天';
 } else {
@@ -58,12 +63,14 @@ if (day === 'all') {
   filter = `days/${dir}/`;
   label = `第 ${n} 天`;
   needsAnthropic = n >= 8;
+  needsEmbedding = n >= 17;
 }
 
 if (values.e2e) {
   const envFile = join(root, '.env');
   if (existsSync(envFile)) process.loadEnvFile(envFile);
-  const missing = (needsAnthropic ? MODEL_ENV : OPENAI_ENV).filter((key) => !process.env[key]);
+  const required = [...(needsAnthropic ? MODEL_ENV : OPENAI_ENV), ...(needsEmbedding ? ['EMBEDDING_MODEL'] : [])];
+  const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     exit(`e2e 模式要调用真实模型，但缺少这些配置：${missing.join('、')}\n先运行 cp .env.example .env，再把它们填好。`);
   }
@@ -78,7 +85,7 @@ const env: NodeJS.ProcessEnv = {
   CHECK_TARGET: values.solution ? 'solution' : 'exercise',
 };
 // mock 模式绝不碰真实接口：就算终端里设置了这些变量，也不传给测试
-if (!values.e2e) for (const key of MODEL_ENV) delete env[key];
+if (!values.e2e) for (const key of [...MODEL_ENV, ...EMBEDDING_ENV, ...SEARCH_ENV]) delete env[key];
 
 const subject = values.solution ? '参考答案' : '练习';
 const model = values.e2e ? `真实模型 ${process.env.OPENAI_MODEL}` : 'mock 模型';

@@ -1,0 +1,292 @@
+// 第 10 天：mini-agent，一个能多轮对话的命令行 Agent。把前 9 天的成果都组装在一起。
+// 第 12 天：能联网搜索、读网页，回答后面附上引用的来源。
+// 运行：node days/day10/solution/cli.ts
+// 用 Anthropic 协议启动：MODEL_PROVIDER=anthropic node days/day10/solution/cli.ts
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+import type { Readable, Writable } from 'node:stream';
+import { describeStatus } from './agent.ts';
+import { createModel, PROVIDERS, providerFromEnv, type Provider } from './providers.ts';
+import { classifyError, withRetry, type ErrorKind } from './retry.ts';
+import { createSession, type Session } from './session.ts';
+import type { ApprovalRequest } from './tool.ts';
+import { searchProviderFromEnv, type SearchProvider } from './search.ts';
+import { createTools } from './tools/index.ts';
+import type { Model } from './types.ts';
+import { calcCost, formatUsage, parsePrice, type Price, type Usage } from './usage.ts';
+import { createSourceRegistry, formatReferences, RESEARCH_PROMPT } from './web.ts';
+
+export interface CLIOptions {
+  input: Readable;
+  output: Writable;
+  /** 读写文件的工具限制在这个目录里 */
+  workspace: string;
+  /** 一开始用哪种协议。不传就读环境变量 MODEL_PROVIDER，默认 openai */
+  provider?: Provider;
+  /** 搜索服务。不传就读环境变量 SEARCH_PROVIDER；传 null 表示不用搜索（第 12 天） */
+  search?: SearchProvider | null;
+}
+
+export const HELP = `命令：
+  /model [openai|anthropic]  查看或切换协议，对话历史保留
+  /cost                      查看这次会话的用量和花费
+  /sources                   列出这次会话里搜到、读过的网页
+  /clear                     清空对话历史，开始新的话题
+  /help                      显示这段说明
+  /exit                      退出（也可以按 Ctrl+D）
+其他输入都会发给 Agent。回答的过程中按 Ctrl+C，可以中断这一轮。`;
+
+const RETRY_REASONS: Record<ErrorKind, string> = {
+  rate_limit: '请求太快被限流了',
+  server: '模型服务出错了',
+  timeout: '请求超时了',
+  network: '网络出错了',
+  quota: '额度不足',
+  context_length: '输入太长',
+  auth: 'API Key 不对',
+  bad_request: '请求有问题',
+  aborted: '已取消',
+  unknown: '出错了',
+};
+
+/** 重试也救不回来的错误，告诉用户该怎么办 */
+const ERROR_HINTS: Partial<Record<ErrorKind, string>> = {
+  context_length: '对话太长了，超出了模型的上下文窗口。用 /clear 开始新的对话',
+  auth: '检查 .env 里的 API Key',
+  quota: '检查模型服务的账户余额',
+};
+
+/** 每种协议的单价，分别从 OPENAI_PRICE、ANTHROPIC_PRICE 读取（格式见 .env.example） */
+function priceOf(provider: Provider): Price | undefined {
+  return parsePrice(process.env[provider === 'anthropic' ? 'ANTHROPIC_PRICE' : 'OPENAI_PRICE']);
+}
+
+/** 工具参数太长时截断，确认时只给用户看个大概 */
+function summarize(input: unknown): string {
+  const json = JSON.stringify(input);
+  return json.length > 200 ? `${json.slice(0, 200)}……` : json;
+}
+
+/**
+ * 按行读输入。不直接用 rl.question：通过管道一次性输入好几行时，没人在等的那几行会丢掉。
+ * 这里把收到的行先排队，谁要就给谁；等待时可以用 signal 取消
+ */
+function createLineReader(input: Readable, output: Writable) {
+  const terminal = (input as { isTTY?: boolean }).isTTY === true;
+  const rl = createInterface({ input, output, terminal });
+  const queue: string[] = [];
+  const waiters: ((line: string | undefined) => void)[] = [];
+  let closed = false;
+  // 不是终端（比如通过管道输入）时，输入的内容不会显示出来。读到一行就补显示一下，记录才好读
+  const take = (line: string) => {
+    if (!terminal) output.write(`${line}\n`);
+    return line;
+  };
+  rl.on('line', (line) => {
+    const waiter = waiters.shift();
+    if (waiter) waiter(take(line));
+    else queue.push(line);
+  });
+  rl.on('close', () => {
+    closed = true;
+    for (const waiter of waiters.splice(0)) waiter(undefined);
+  });
+
+  return {
+    rl,
+    /** 显示提示符，读下一行。输入结束或者被取消时返回 undefined */
+    ask(prompt: string, signal?: AbortSignal): Promise<string | undefined> {
+      rl.setPrompt(prompt);
+      rl.prompt();
+      const queued = queue.shift();
+      if (queued !== undefined) return Promise.resolve(take(queued));
+      if (closed || signal?.aborted) return Promise.resolve(undefined);
+      return new Promise((resolve) => {
+        const waiter = (line: string | undefined) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(line);
+        };
+        const onAbort = () => {
+          waiters.splice(waiters.indexOf(waiter), 1);
+          resolve(undefined);
+        };
+        waiters.push(waiter);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    },
+  };
+}
+
+/** 思考、回答、工具调用三种输出之间空一行；思考内容用暗色显示 */
+function createPrinter(write: (text: string) => void) {
+  let lastKind = '';
+  return (kind: 'thinking' | 'text' | 'tool', text: string) => {
+    if (lastKind && lastKind !== kind) write('\n\n');
+    else if (kind === 'tool' && lastKind === 'tool') write('\n');
+    lastKind = kind;
+    write(kind === 'thinking' ? `\x1b[2m${text}\x1b[0m` : text);
+  };
+}
+
+/** 运行 mini-agent，直到用户输入 /exit 或者输入结束。返回这次的会话，方便测试检查 */
+export async function runCLI(options: CLIOptions): Promise<Session> {
+  const { input, output, workspace } = options;
+  const write = (text: string) => output.write(text);
+  let provider = options.provider ?? providerFromEnv();
+  let cost = 0; // 累计花费：每次调用按当时所用协议的单价计算
+  let pricedAll = true; // 是不是每次调用都有单价
+
+  const makeModel = (name: Provider): Model =>
+    withRetry(createModel(name), {
+      onRetry: ({ attempt, delayMs, kind, partial }) => {
+        const restart = partial ? '，回答会从头重新生成' : '';
+        write(`\n（${RETRY_REASONS[kind]}，${(delayMs / 1000).toFixed(1)} 秒后第 ${attempt} 次重试${restart}）\n`);
+      },
+    });
+  const search = options.search === undefined ? searchProviderFromEnv() : (options.search ?? undefined);
+  const sources = createSourceRegistry();
+  const session = createSession({
+    model: makeModel(provider),
+    tools: createTools(workspace, { search, sources }),
+    system: RESEARCH_PROMPT,
+  });
+  const reader = createLineReader(input, output);
+  let current: AbortController | undefined; // 正在进行的这一轮
+
+  // 在终端里按 Ctrl+C：正在回答就中断这一轮，否则退出
+  reader.rl.on('SIGINT', () => {
+    if (current) current.abort();
+    else reader.rl.close();
+  });
+
+  const countCost = (usage: Usage) => {
+    const price = priceOf(provider);
+    if (price) cost += calcCost(usage, price);
+    else pricedAll = false;
+  };
+  const totals = () => {
+    const money = cost > 0 ? ` · 约 ${cost.toFixed(4)} 元${pricedAll ? '' : '（有的调用没填单价，没算进去）'}` : '';
+    return `${session.turns} 轮 · ${formatUsage(session.usage)}${money}`;
+  };
+
+  // 并行的工具调用可能同时要求确认：排成队，一个一个问
+  let approvals = Promise.resolve(true);
+  function confirm(request: ApprovalRequest, signal: AbortSignal): Promise<boolean> {
+    const next = approvals.then(async () => {
+      if (signal.aborted) return false;
+      write(`\n要执行 ${request.tool} ${summarize(request.input)}\n`);
+      const answer = await reader.ask('允许吗？(y/N) ', signal);
+      // 只有明确回答 y 才执行，直接回车、输入别的都当作不同意
+      return ['y', 'yes'].includes(answer?.trim().toLowerCase() ?? '');
+    });
+    approvals = next.catch(() => false);
+    return next;
+  }
+
+  function handleCommand(text: string): 'exit' | void {
+    const [command, arg] = text.split(/\s+/);
+    switch (command) {
+      case '/exit':
+      case '/quit':
+        return 'exit';
+      case '/help':
+        write(`${HELP}\n`);
+        return;
+      case '/cost':
+        write(`${totals()}\n`);
+        return;
+      case '/sources': {
+        const list = sources.list();
+        write(list.length ? `${list.map((s) => `[${s.id}] ${s.title || '（无标题）'} ${s.url}`).join('\n')}\n` : '还没有搜到或读过网页\n');
+        return;
+      }
+      case '/clear':
+        session.clear();
+        write('已清空对话历史，开始新的对话\n');
+        return;
+      case '/model': {
+        if (!arg) {
+          write(`当前模型：${session.model.name}。可以切换的协议：${PROVIDERS.join('、')}\n`);
+          return;
+        }
+        if (!PROVIDERS.includes(arg as Provider)) {
+          write(`不认识的协议：${arg}。可以切换的协议：${PROVIDERS.join('、')}\n`);
+          return;
+        }
+        try {
+          session.model = makeModel(arg as Provider);
+          provider = arg as Provider;
+          write(`已切换到 ${session.model.name}，对话历史保留\n`);
+        } catch (error) {
+          write(`切换失败：${(error as Error).message}\n`); // 比如 .env 里没填这种协议的配置
+        }
+        return;
+      }
+      default:
+        write(`不认识的命令：${command}。输入 /help 查看可用的命令\n`);
+    }
+  }
+
+  async function runTurn(text: string) {
+    const controller = new AbortController();
+    current = controller;
+    const print = createPrinter(write);
+    try {
+      const result = await session.send(text, {
+        signal: controller.signal,
+        onReasoning: (piece) => print('thinking', piece),
+        onText: (piece) => print('text', piece),
+        onToolCall: (call, toolResult) => {
+          const status = toolResult.isError ? '✗' : '✓';
+          print('tool', `${status} ${call.function.name} ${call.function.arguments}\n  ${toolResult.content.split('\n')[0]}`);
+        },
+        onUsage: countCost,
+        confirm: (request) => confirm(request, controller.signal),
+      });
+      // 回答里引用了 [编号]，在后面列出这些来源。编号对不上的，提醒用户这可能是模型编的
+      const { cited, unknown } = formatReferences(result.answer, sources);
+      if (cited.length) write(`\n\n来源：\n${cited.map((s) => `[${s.id}] ${s.title || '（无标题）'} ${s.url}`).join('\n')}`);
+      if (unknown.length) write(`\n\n（注意：回答里的 ${unknown.map((id) => `[${id}]`).join('')} 不是查到过的来源）`);
+      if (result.status !== 'completed') write(`\n\n（${describeStatus(result)}）`);
+      write(`\n\n本轮：${formatUsage(result.usage, priceOf(provider))}\n`);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        write('\n（已中断，这一轮不会记进对话历史）\n');
+      } else {
+        const hint = ERROR_HINTS[classifyError(error).kind];
+        write(`\n（出错了：${(error as Error).message}${hint ? `。${hint}` : ''}）\n`);
+      }
+    } finally {
+      current = undefined;
+    }
+  }
+
+  const searchInfo = search ? `搜索 ${search.name}` : '没有配置搜索（见 .env.example 的 SEARCH_PROVIDER）';
+  write(`mini-agent · ${session.model.name} · ${searchInfo} · 工作目录 ${workspace}\n输入 /help 查看命令\n`);
+  while (true) {
+    const line = await reader.ask('\n你 > ');
+    if (line === undefined) break; // 按了 Ctrl+D，或者管道里的输入读完了
+    const text = line.trim();
+    if (!text) continue;
+    if (text.startsWith('/')) {
+      if (handleCommand(text) === 'exit') break;
+      continue;
+    }
+    await runTurn(text);
+  }
+  write(`\n再见！${totals()}\n`);
+  reader.rl.close();
+  return session;
+}
+
+if (import.meta.main) {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // 没有 .env 文件时，就用终端里已经设置的环境变量
+  }
+  const workspace = resolve(process.env.AGENT_WORKSPACE ?? 'workspace');
+  mkdirSync(workspace, { recursive: true });
+  await runCLI({ input: process.stdin, output: process.stdout, workspace });
+}

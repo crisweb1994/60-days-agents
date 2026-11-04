@@ -1,6 +1,7 @@
 // 本地的模型服务器，按测试准备好的脚本逐轮回复。同时实现了两种协议：
 // - OpenAI 兼容接口：POST …/chat/completions
 // - Anthropic 协议：POST …/v1/messages（第 8 天起）
+// - Embedding：POST …/embeddings（第 17 天起）。不用脚本，按文本算出固定的向量，字面上越像的文本向量越接近
 // 学员代码照常用 fetch 调用；测试决定每一轮返回什么，并检查收到的每个请求。
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -107,6 +108,8 @@ export interface MockLLM {
   readonly requests: ChatRequest[];
   /** 收到的每个 Anthropic 协议请求，按顺序记录 */
   readonly anthropicRequests: AnthropicRequest[];
+  /** 收到的每个 embedding 请求，按顺序记录 */
+  readonly embeddingRequests: EmbeddingRequest[];
   /** 还没用掉的脚本条数 */
   readonly pending: number;
   /** 追加一轮成功的回复 */
@@ -117,6 +120,19 @@ export interface MockLLM {
   reset(): void;
   close(): Promise<void>;
 }
+
+export interface EmbeddingRequest {
+  model: string;
+  input: string | string[];
+  dimensions?: number;
+  encoding_format?: string;
+  [key: string]: unknown;
+}
+
+/** mock 的 embedding 一次最多接受几条。真实服务各有上限，客户端要自己分批 */
+export const MOCK_EMBEDDING_BATCH = 32;
+/** mock 的向量维数 */
+export const MOCK_EMBEDDING_DIMENSIONS = 256;
 
 type Turn = { reply: MockReply } | { failure: MockFailure };
 type Usage = { prompt_tokens: number; completion_tokens: number; total_tokens: number; [key: string]: unknown };
@@ -131,6 +147,7 @@ export async function startMockLLM(): Promise<MockLLM> {
   const turns: Turn[] = [];
   const requests: ChatRequest[] = [];
   const anthropicRequests: AnthropicRequest[] = [];
+  const embeddingRequests: EmbeddingRequest[] = [];
   const issued: IssuedThinking = new Map();
   let scripted = 0;
   let nextToolCallId = 1;
@@ -151,9 +168,15 @@ export async function startMockLLM(): Promise<MockLLM> {
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse, protocol: Protocol, signal: AbortSignal): Promise<void> {
+    if (req.method === 'POST' && req.url?.endsWith('/embeddings')) return handleEmbeddings(req, res);
     const isOpenAI = req.url?.endsWith('/chat/completions');
     if (req.method !== 'POST' || (!isOpenAI && protocol !== 'anthropic')) {
-      return sendError(res, protocol, 404, `mock 只实现了 POST /chat/completions 和 POST /v1/messages，收到的是 ${req.method} ${req.url}`);
+      return sendError(
+        res,
+        protocol,
+        404,
+        `mock 只实现了 POST /chat/completions、POST /embeddings 和 POST /v1/messages，收到的是 ${req.method} ${req.url}`,
+      );
     }
     if (protocol === 'openai' && !req.headers.authorization?.startsWith('Bearer ')) {
       return sendError(res, protocol, 401, '请求头里缺少 Authorization: Bearer <API Key>');
@@ -211,6 +234,35 @@ export async function startMockLLM(): Promise<MockLLM> {
       model: result.model,
       choices: [{ index: 0, message, finish_reason: result.finishReason }],
       usage: result.usage,
+    });
+  }
+
+  /** OpenAI 兼容的 embedding 接口。像真实接口一样检查空文本和单次条数 */
+  async function handleEmbeddings(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!req.headers.authorization?.startsWith('Bearer ')) {
+      return sendError(res, 'openai', 401, '请求头里缺少 Authorization: Bearer <API Key>');
+    }
+    let body: EmbeddingRequest;
+    try {
+      body = JSON.parse(await text(req));
+    } catch {
+      return sendError(res, 'openai', 400, '请求体不是合法的 JSON');
+    }
+    if (typeof body.model !== 'string' || body.model === '') return sendError(res, 'openai', 400, '缺少 model 字段');
+    const inputs = typeof body.input === 'string' ? [body.input] : body.input;
+    if (!Array.isArray(inputs) || inputs.length === 0) return sendError(res, 'openai', 400, 'input 必须是字符串或非空的字符串数组');
+    if (inputs.length > MOCK_EMBEDDING_BATCH) {
+      return sendError(res, 'openai', 400, `input 一次最多 ${MOCK_EMBEDDING_BATCH} 条，收到了 ${inputs.length} 条。请分批发送`);
+    }
+    const empty = inputs.findIndex((item) => typeof item !== 'string' || item.trim() === '');
+    if (empty !== -1) return sendError(res, 'openai', 400, `input[${empty}] 是空的，或者不是字符串。空文本不能做 embedding`);
+    embeddingRequests.push(body);
+    const dimensions = body.dimensions ?? MOCK_EMBEDDING_DIMENSIONS;
+    sendJSON(res, 200, {
+      object: 'list',
+      model: body.model,
+      data: inputs.map((input, index) => ({ object: 'embedding', index, embedding: mockEmbedding(input, dimensions) })),
+      usage: { prompt_tokens: estimate(inputs.join('')), total_tokens: estimate(inputs.join('')) },
     });
   }
 
@@ -302,6 +354,7 @@ export async function startMockLLM(): Promise<MockLLM> {
     anthropicBaseURL: `http://127.0.0.1:${port}`,
     requests,
     anthropicRequests,
+    embeddingRequests,
     get pending() {
       return turns.length;
     },
@@ -319,6 +372,7 @@ export async function startMockLLM(): Promise<MockLLM> {
       turns.length = 0;
       requests.length = 0;
       anthropicRequests.length = 0;
+      embeddingRequests.length = 0;
       issued.clear();
       scripted = 0;
       nextToolCallId = 1;
@@ -489,6 +543,32 @@ function split(value: string): string[] {
   const pieces: string[] = [];
   for (let i = 0; i < chars.length; i += CHUNK_SIZE) pieces.push(chars.slice(i, i + CHUNK_SIZE).join(''));
   return pieces;
+}
+
+/**
+ * mock 的 embedding：把文本切成特征（英文和数字按单词，中文按单字和相邻两字），每个特征哈希到一个维度上，最后归一化。
+ * 不懂语义，只看字面：共用的词越多，余弦相似度越高。足够测试检索的流程，测不了「意思相近、字面不同」
+ */
+export function mockEmbedding(input: string, dimensions = MOCK_EMBEDDING_DIMENSIONS): number[] {
+  const vector = new Array<number>(dimensions).fill(0);
+  const text = input.toLowerCase();
+  const features: string[] = text.match(/[a-z0-9]+/g) ?? [];
+  const han = text.match(/\p{Script=Han}+/gu) ?? [];
+  for (const run of han) {
+    for (let i = 0; i < run.length; i++) {
+      features.push(run[i]);
+      if (i + 1 < run.length) features.push(run.slice(i, i + 2));
+    }
+  }
+  for (const feature of features) {
+    let hash = 2166136261; // FNV-1a
+    for (const char of feature) hash = Math.imul(hash ^ char.codePointAt(0)!, 16777619);
+    vector[(hash >>> 0) % dimensions] += 1;
+  }
+  const norm = Math.hypot(...vector);
+  // 一个特征都没有（比如只有标点）时，返回一个固定的单位向量，免得出现全 0
+  if (norm === 0) return vector.map((_, i) => (i === 0 ? 1 : 0));
+  return vector.map((value) => value / norm);
 }
 
 function sendJSON(res: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}) {

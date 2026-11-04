@@ -1,6 +1,6 @@
 # 模型接入说明
 
-> 最后核对：2026-11-01
+> 最后核对：2026-11-02
 
 课程代码默认通过 OpenAI 兼容接口调用模型，第 8 天起同时支持 Anthropic 兼容接口。模型名和接口细节变化很快，讲义里不写死，统一以本页和 `.env.example` 为准。
 
@@ -44,3 +44,42 @@
 - **忽略的字段**：DeepSeek 忽略 `anthropic-version`、`cache_control`、`budget_tokens`、`disable_parallel_tool_use`，并且把 `tool_choice: any` 当作 `auto`，不支持 `redacted_thinking`；Ollama 不支持 `tool_choice` 和 `cache_control`，出错时不发 SSE 的 error 事件。（第 8 天）
 - **模型名**：有的服务会把 Claude 的模型名映射成自己的模型（比如 DeepSeek），但最好在 `ANTHROPIC_MODEL` 里明确写上它自己的模型名。
 - **停止原因**：有的服务只返回一部分取值，比如 Kimi 的文档只列了 `end_turn`、`max_tokens`、`tool_use`、`refusal`。
+
+## Embedding（第 17 天起）
+
+embedding 走 OpenAI 兼容的 `POST …/embeddings`：`{ model, input: [文字……] }` → `{ data: [{ index, embedding }] }`。配置在 `EMBEDDING_*` 里，地址和 Key 不填时沿用 `OPENAI_*`。
+
+| 模型服务 | 接口地址（EMBEDDING_BASE_URL） | 说明 |
+|---|---|---|
+| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 和对话同一个地址、同一个 Key |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | 和对话同一个地址、同一个 Key |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | 提供多种开源的 embedding 和重排模型 |
+| 本地 Ollama | `http://localhost:11434/v1` | 先 `ollama pull` 一个 embedding 模型 |
+| DeepSeek | — | 文档里没有 embedding 接口，要另选一家 |
+
+以上地址在 2026-11-02 用不带 API Key 的请求验证过（返回 400 或 401，接口存在）。
+
+<!-- TODO: 逐家写上推荐的 embedding 模型名、维数和单次条数上限 -->
+
+- **单次条数上限各不相同**，超出会返回 400，客户端要分批（课程代码默认每批 16 条）。mock 模型的上限是 32 条。（第 17 天）
+- **空字符串会被拒绝**，课程代码在发请求之前就检查。（第 17 天）
+- **`dimensions` 参数**：只有部分模型支持指定维数，不支持的会报错或忽略，用 `EMBEDDING_DIMENSIONS` 配置。（第 17 天）
+- **返回的 `data` 不保证和输入同样的顺序**，要按 `index` 放回去。（第 17 天）
+
+## 重排（第 18 天起）
+
+不少服务提供格式相近的 `POST …/rerank`：`{ model, query, documents, top_n }` → `{ results: [{ index, relevance_score }] }`，比如硅基流动（`https://api.siliconflow.cn/v1/rerank`）和 Jina（`https://api.jina.ai/v1/rerank`），2026-11-02 验证过接口存在（未带 Key 时返回 401）。没有重排服务时，课程代码可以直接让对话模型来排。
+
+## 联网搜索（第 12 天起）
+
+| 服务 | 接口 | 认证 | 结果在哪 |
+|---|---|---|---|
+| Tavily | `POST https://api.tavily.com/search`，`{ query, max_results }` | `Authorization: Bearer` | `results[].title / url / content / published_date` |
+| 博查 | `POST https://api.bochaai.com/v1/web-search`，`{ query, count, summary }` | `Authorization: Bearer` | `data.webPages.value[].name / url / snippet / summary / datePublished` |
+| Brave | `GET https://api.search.brave.com/res/v1/web/search?q=…&count=…` | `X-Subscription-Token` | `web.results[].title / url / description`（带 HTML 标签） |
+| 智谱 Web Search | `POST https://open.bigmodel.cn/api/paas/v4/web_search` | `Authorization: Bearer` | 课程代码没有接入，可以照着前三个写一个适配器 |
+
+以上接口在 2026-11-02 用不带 Key 的请求验证过：Tavily 和博查返回 401，Brave 返回 422（缺少 `X-Subscription-Token`），智谱返回 401。
+
+- **博查**出错时可能是 HTTP 200，错误写在返回体的 `code` 和 `msg` 里，要检查 `code`。（第 12 天）
+- **Brave** 的摘要里带着 `<strong>` 等标签和字符实体，要清洗。（第 12 天）
