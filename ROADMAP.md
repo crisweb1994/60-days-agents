@@ -142,17 +142,18 @@
 
 ---
 
-## 附录 A：技术基线（最后核对：2026-11-01）
+## 附录 A：技术基线（最后核对：2026-11-07）
 
 | 类别 | 选型 |
 |---|---|
 | 运行时 | Node.js 22.18+（推荐 24 或 26 LTS，直接运行 .ts，无需编译）、TypeScript 7（ESM）、vitest 5、zod 4 |
 | 模型接口 | 默认使用 OpenAI 兼容接口；第 8 天起同时支持 Anthropic 兼容接口 |
 | MCP | 2026-07-28 规范；官方 TypeScript SDK v2（`@modelcontextprotocol/server` 和 `@modelcontextprotocol/client`；`@modelcontextprotocol/sdk` 仍是 v1），可与 2025 版的客户端和服务器互通 |
-| 框架 | Vercel AI SDK 7、Claude Agent SDK、OpenAI Agents SDK、Mastra、LangGraph.js |
-| 存储与队列 | PostgreSQL + pgvector、Redis + BullMQ |
+| 框架 | Vercel AI SDK 7（`ai`、`@ai-sdk/openai-compatible`）、Claude Agent SDK、OpenAI Agents SDK；Mastra、LangGraph.js 只在第 41 天介绍 |
+| 存储与队列 | PostgreSQL（测试用进程内的 PGlite）+ 行级安全，pgvector（线上）；Redis + BullMQ |
 | 观测与评估 | OpenTelemetry、Langfuse（自托管）、promptfoo、evalite |
 | 浏览器 | Playwright |
+| 文件 | unpdf（基于 pdf.js）解析 PDF；对象存储用 S3 兼容的接口 |
 | 部署 | Docker |
 
 默认模型、各家的模型名和接口兼容差异（比如有的 Anthropic 兼容接口会忽略缓存控制字段）统一记录在 [docs/models.md](docs/models.md)，讲义里不写死模型名；CI 定期在默认模型上验证。

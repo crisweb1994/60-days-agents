@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>研究助手</title>
+<style>
+  :root { --bg: #fafaf9; --fg: #1c1917; --muted: #78716c; --line: #e7e5e4; --card: #fff; --accent: #0f766e; --err: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1917; --fg: #f5f5f4; --muted: #a8a29e; --line: #44403c; --card: #292524; --accent: #2dd4bf; --err: #f87171; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  textarea { flex: 1 1 100%; min-height: 72px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: inherit; resize: vertical; }
+  button, select { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--muted); margin: 16px 0 8px; min-height: 1.6em; }
+  #timeline { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--line); }
+  #timeline li { position: relative; margin: 0 0 10px 0; padding: 6px 10px 6px 16px; }
+  #timeline li::before { content: ""; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+  #timeline li.running::before { background: var(--accent); animation: pulse 1s infinite; }
+  #timeline li.done::before { background: var(--accent); }
+  #timeline li.error::before { background: var(--err); }
+  .tool-name { font-family: ui-monospace, monospace; font-weight: 600; }
+  .tool-input { color: var(--muted); font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+  details pre { white-space: pre-wrap; font-size: 13px; max-height: 240px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .step-text { white-space: pre-wrap; }
+  #answer { margin-top: 20px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; }
+  #answer:empty { display: none; }
+  #sources { padding-left: 20px; }
+  #sources a { color: var(--accent); word-break: break-all; }
+  .error { color: var(--err); }
+  @keyframes pulse { 50% { opacity: .3; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>研究助手</h1>
+  <form id="form">
+    <textarea id="question" placeholder="比如：潮汐协议 3.0 的默认端口是多少？" required></textarea>
+    <select id="mode" aria-label="模式"><option value="quick">快速回答</option><option value="deep">深度研究</option></select>
+    <button class="primary" id="ask" type="submit">提问</button>
+    <button id="stop" type="button" disabled>停止</button>
+    <button id="retry" type="button" disabled>重试</button>
+  </form>
+  <div id="status" role="status"></div>
+  <ol id="timeline" aria-label="调研步骤"></ol>
+  <div id="answer"></div>
+  <ol id="sources" aria-label="来源"></ol>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

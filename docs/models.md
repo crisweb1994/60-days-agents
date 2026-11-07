@@ -104,3 +104,27 @@ embedding 走 OpenAI 兼容的 `POST …/embeddings`：`{ model, input: [文字�
 
 - **博查**出错时可能是 HTTP 200，错误写在返回体的 `code` 和 `msg` 里，要检查 `code`。（第 12 天）
 - **Brave** 的摘要里带着 `<strong>` 等标签和字符实体，要清洗。（第 12 天）
+
+## 框架和 SDK（第 41 天起）
+
+- **Vercel AI SDK**：国产模型用 `@ai-sdk/openai-compatible` 接入（`createOpenAICompatible({ baseURL, apiKey, includeUsage: true })`）。它会把思考内容写回 `reasoning_content`。默认只发 `response_format: { type: "json_object" }`，确认模型支持 `json_schema` 以后加上 `supportsStructuredOutputs: true` 才会发 schema。（第 42 天）
+- AI SDK 的 `maxRetries` 默认是 2，和第 9 天的 `withRetry` 叠加会把请求数乘起来，课程里设成 0。流式时接口错误在 `fullStream` 的 error 部分里，不会直接抛出。（第 42 天）
+- **OpenAI Agents SDK**：默认走 Responses API，国产模型要换成 `OpenAIChatCompletionsModel`；默认把 trace 发到 OpenAI 的平台，用 `setTracingDisabled(true)` 关掉；工具参数默认是 strict 模式，课程里关掉。（第 41 天）
+- **Claude Agent SDK**：运行时用 Anthropic 协议，读 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`（或 `ANTHROPIC_AUTH_TOKEN`）和 `ANTHROPIC_MODEL`。多家国产模型服务写了接入 Claude Code 的说明，可以照着配；它在后台还会用一个小模型，也要映射到能用的模型，环境变量以 Claude Code 的文档为准。`total_cost_usd` 按 Anthropic 的价格估算。许可是商业条款，不是开源许可。（第 43 天）
+
+<!-- TODO: 逐家用 AI SDK 和 Claude Agent SDK 实测一遍，记下不兼容的地方 -->
+
+## 视觉模型（第 47 天起）
+
+读截图、读图片要用支持图片输入的模型，配置在 `VISION_*`：`VISION_MODEL` 必填，`VISION_BASE_URL`、`VISION_API_KEY` 不填时沿用 `OPENAI_*`。
+
+| 协议 | 图片的写法 |
+|---|---|
+| OpenAI 兼容接口 | user 消息的 `content` 是数组：`{ "type": "image_url", "image_url": { "url": "data:image/png;base64,…" } }`，也可以是公网能访问的网址 |
+| Anthropic 协议 | `{ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "…" } }` |
+
+- 不是每个模型都支持图片：同一家服务里，视觉模型往往是单独的型号
+- 图片的大小、分辨率、一次几张都有上限，图片也按 token 计费，超大的图片先缩小再发
+- 图片里的文字和网页一样是不可信的内容，可能夹带提示注入（第 37、47 天）
+
+<!-- TODO: 逐家写上视觉模型的型号、图片大小上限和计费方式 -->

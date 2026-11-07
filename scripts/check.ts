@@ -20,7 +20,8 @@ const EMBEDDING_ENV = ['EMBEDDING_BASE_URL', 'EMBEDDING_API_KEY', 'EMBEDDING_MOD
 // 联网搜索的 Key（第 12 天起）。测试用本地的假搜索服务，mock 模式下也不传给测试
 const SEARCH_ENV = ['SEARCH_PROVIDER', 'TAVILY_API_KEY', 'BOCHA_API_KEY', 'BRAVE_API_KEY'];
 // 可选的配置：便宜的模型（第 22 天起）、第二家模型（第 33 天起）、单价、Langfuse（第 34 天起）。不填时代码有退路
-const OPTIONAL_ENV = ['CHEAP_MODEL', 'CHEAP_PRICE', 'ALT_BASE_URL', 'ALT_API_KEY', 'ALT_MODEL', 'ALT_PRICE', 'OPENAI_PRICE', 'LANGFUSE_BASE_URL', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY'];
+const OPTIONAL_ENV = ['CHEAP_MODEL', 'CHEAP_PRICE', 'ALT_BASE_URL', 'ALT_API_KEY', 'ALT_MODEL', 'ALT_PRICE', 'OPENAI_PRICE', 'LANGFUSE_BASE_URL', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY', 'VISION_BASE_URL', 'VISION_API_KEY', 'VISION_MODEL'];
+// REDIS_URL（第 45 天）、DATABASE_URL（第 46 天）是本机的基础设施，不是模型服务：mock 模式下照样传给测试，设了就多跑对应的测试
 const root = join(import.meta.dirname, '..');
 
 function exit(message: string): never {

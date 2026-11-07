@@ -1,5 +1,9 @@
 node_modules/
 .env
+# 第 48 天起：.env.production 之类的环境配置也不提交，模板除外
+.env.*
+!.env.example
+!**/.env.production.example
 coverage/
 *.log
 .DS_Store
@@ -14,3 +18,6 @@ mcp.json
 evals/*.json
 !evals/baseline.json
 eval-report.md
+# 第 45、47、48 天：本地运行时的检查点、上传的文件
+**/checkpoints/
+**/objects/

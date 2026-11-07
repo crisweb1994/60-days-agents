@@ -92,8 +92,32 @@ days/day05/
 | `injection.ts` | 37 | 可疑文字、污染跟踪和外传检查、清理回答。研究助手默认开启（`guard: false` 关掉）；`data/web.ts` 加三个恶意网页，评估集加 `forbiddenCalls` 和红队用例 |
 | `sandbox.ts`、`security.ts` | 38 | Docker 代码沙箱和 `run_code`；网络白名单、密钥、MCP 工具审核和指纹。`ResearchSetup` 加 `sandbox`、`allowHosts`、`secrets` |
 | `guardrails.ts`、`compliance.ts` | 39 | 敏感信息、输入输出护栏、内容审核、拒答和兜底；生成内容的显式和隐式标识。`saveReport` 可以带标识 |
+| `service.ts`、`eval/service.ts` | 40 | 研究助手服务：鉴权、请求校验、并发上限、额度、护栏、追踪、同步和异步两种接口；对着服务跑评估 |
 
 第 38 天真的 Docker 沙箱的测试，只在本机有 Docker、镜像（默认 `python:3.12-slim` 和 `node:22-alpine`）也已经下载好时才跑，测试不会替学员下载镜像；CI 里一般会跳过。第 37 天起，`data/web.ts` 的网页里可以写 `{{BASE}}`，返回时换成假互联网的地址。
+
+## 第五阶段的代码结构
+
+第 41–50 天接着第 40 天的代码，长成上线的 Web 应用。框架都从我们自己的 `Tool` 和 `Model` 转换过去，原有的代码不改；第 48 天起每天带着 `deploy/`（Dockerfile、compose、nginx、自动发布的模板）：
+
+| 文件 | 从第几天起 | 内容 |
+|---|---|---|
+| `frameworks/` | 41 | 同一个 mini-agent 的三种实现：手写、Vercel AI SDK、OpenAI Agents SDK；`executeChecked`（先用 zod 校验再执行）；同一组任务的比较。`notes-template.md` 只在第 41 天 |
+| `ai-model.ts`、`ai-agent.ts` | 42 | 用 AI SDK 实现 `Model`（消息、工具、停止原因、错误、流式的转换）；`ToolLoopAgent` 跑研究助手、`toolApproval`、`Output.object` 的规划。`providers.ts` 加 `ai-sdk` |
+| `claude-agent.ts` | 43 | Claude Agent SDK：哈希链的审计日志、审计 hooks、命令护栏、`canUseTool`、进程内的 MCP 服务器 |
+| `ui-stream.ts`、`timeline.ts`、`web-server.ts`、`public/` | 44 | UI Message Stream 协议的推送、前端的状态归并（浏览器和测试共用）、网页。`agent.ts` 加 `onToolStart` |
+| `jobs.ts`、`worker.ts`、`jobs-server.ts`、`jobs-bullmq.ts` | 45 | 任务和事件的存储、内存队列、恢复；worker 的五种结局；SSE 续传；Redis 和 BullMQ 的实现。`streamResearch` 可以带检查点 |
+| `db.ts`、`auth.ts`、`tenant-store.ts`、`quota.ts` | 46 | PGlite / pg、表结构和 RLS、`withTenant`；密码、令牌、API Key；按用户的记忆、检索、会话；令牌桶和每日配额 |
+| `uploads.ts`、`pdf.ts`、`vision.ts`、`ingest.ts`、`files-server.ts` | 47 | 上传、魔数、对象存储；按页解析 PDF；视觉模型读图；后台建索引；文件的接口。测试用的 PDF 由 `tests/pdf-fixture.ts` 生成 |
+| `config.ts`、`logger.ts`、`server-main.ts`、`deploy/` | 48 | 配置校验、结构化日志、健康检查、优雅退出、线上的组装。`jobs-bullmq.ts` 加 `worker: false` |
+| `prompt-registry.ts`、`rollout.ts`、`metrics.ts`、`feedback.ts` | 49 | prompt 的版本、灰度和 A/B、监控告警、反馈回流到评估集。`research()` 加 `system` |
+
+第 41–49 天用到的 `ai`、`@ai-sdk/openai-compatible`、`@openai/agents`、`openai`、`@anthropic-ai/claude-agent-sdk`、`bullmq`、`ioredis`、`pg`、`@electric-sql/pglite`、`unpdf` 都已经写进根目录的 `package.json`。几类依赖外部环境的测试会按条件跳过，CI 里一般都跳过：
+
+- 第 43 天真的启动 Claude Agent SDK：只在 e2e 模式下跑，要配好 Anthropic 兼容接口
+- 第 44 天真的浏览器：本机有 Playwright 的 Chromium 时才跑（和第 27 天一样）
+- 第 45 天的 Redis + BullMQ：设了 `REDIS_URL` 时才跑
+- 第 46 天的真 PostgreSQL：设了 `DATABASE_URL` 时才跑；其余的数据库测试都用 PGlite，不需要装数据库
 
 ## 练习怎么写
 
@@ -185,4 +209,4 @@ npm run check 5                   # 确认练习的初始状态确实会失败
 npm run check 5 -- --solution     # 只测某一天的参考答案
 ```
 
-CI 会在每次 push 和 PR 时运行类型检查和 `npm test`（第 27 天真浏览器的测试在 CI 里跳过）。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`；第 17 天起还要变量 `EMBEDDING_MODEL`（地址和 Key 不配时沿用 `OPENAI_*`）；第 22 天起可选的变量 `CHEAP_MODEL`（不配时沿用 `OPENAI_MODEL`）；第 33 天起可选的变量 `ALT_MODEL`、`ALT_BASE_URL` 和密钥 `ALT_API_KEY`（横评用的第二家模型，不配时用 `CHEAP_MODEL`）。
+CI 会在每次 push 和 PR 时运行类型检查和 `npm test`（第 27 天真浏览器的测试在 CI 里跳过）。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`；第 17 天起还要变量 `EMBEDDING_MODEL`（地址和 Key 不配时沿用 `OPENAI_*`）；第 22 天起可选的变量 `CHEAP_MODEL`（不配时沿用 `OPENAI_MODEL`）；第 33 天起可选的变量 `ALT_MODEL`、`ALT_BASE_URL` 和密钥 `ALT_API_KEY`（横评用的第二家模型，不配时用 `CHEAP_MODEL`）；第 47 天起可选的变量 `VISION_MODEL`（视觉模型，不配时 e2e 不测读图）。
