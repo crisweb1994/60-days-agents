@@ -1,0 +1,58 @@
+# 第 33 天：每个 PR 自动跑评估，把对比报告贴到 PR 的评论里。
+# 用法：复制到你自己项目的 .github/workflows/eval.yml，按你的目录改好下面的路径。
+# 课程仓库本身不启用它：每次跑都要调用真实模型，会产生费用。
+#
+# 需要在仓库设置里配置：
+#   变量 OPENAI_BASE_URL、OPENAI_MODEL，密钥 OPENAI_API_KEY；变量 EMBEDDING_MODEL（地址和 Key 不配时沿用 OPENAI_*）
+#   可选的变量 OPENAI_PRICE（单价，用来比较花费）
+# 基线 evals/baseline.json 提交在仓库里：它变了，说明你接受了一次分数的变化，这本身也要经过代码评审。
+# 合并之前，在本地用 --update-baseline 重新生成基线，和代码一起提交。
+name: Eval
+
+on:
+  pull_request:
+    # 只有可能影响 Agent 行为的改动才跑：prompt、工具、模型配置、评估集本身
+    paths:
+      - 'src/**'
+      - 'evals/**'
+      - 'data/eval/**'
+
+# 同一个 PR 推了新的提交，取消还在跑的那次，省钱
+concurrency:
+  group: eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_PRICE: ${{ vars.OPENAI_PRICE }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # 门禁不通过时这一步失败，但还要接着贴评论，所以先记下结果
+      - name: 跑评估并和基线比较
+        id: eval
+        run: node src/eval/ci.ts --baseline evals/baseline.json --report eval-report.md
+        continue-on-error: true
+      - name: 把报告贴到 PR 里（已经贴过就更新那一条）
+        if: always() && hashFiles('eval-report.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file eval-report.md --edit-last --create-if-none
+      - name: 门禁没有通过
+        if: steps.eval.outcome == 'failure'
+        run: exit 1

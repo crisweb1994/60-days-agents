@@ -56,6 +56,45 @@ days/day05/
 
 第 13、14 天用到官方的 MCP TypeScript SDK v2（`@modelcontextprotocol/client`、`@modelcontextprotocol/server`），已经写进根目录的 `package.json`。
 
+## 第三阶段的代码结构
+
+第 21–30 天接着第 20 天的代码，长成研究助手 v2。只在某一天用到的数据（第 21 天的 `data/compare-tasks.ts`、第 22 天的 `data/routes.ts`）不往后带；第 28 天的两个示例 skill 放在 `days/day28/skills/`，exercise 和 solution 共用：
+
+| 文件 | 从第几天起 | 内容 |
+|---|---|---|
+| `workflow.ts`、`compare.ts` | 21 | 固定流程版的研究助手；同一组任务对比两种做法的效果、成本、延迟。第 22 天搜索和打开网页改成并行 |
+| `parallel.ts`、`router.ts` | 22 | 有并发上限的 `mapLimit`、多数投票；用便宜的模型分类、按类别回答、评估准确率。`providers.ts` 加 `createCheapModel()` |
+| `plan.ts` | 23 | 计划工具 `update_plan`；先规划后执行、失败后重新规划。`research.ts` 加 `planResearch()` |
+| `verify.ts` | 24 | 引用核查（数字对照、模型评审、校验评审）、生成 → 核查 → 修改的循环。来源登记从这天起保存读到的内容 |
+| `subagent.ts` | 25 | 子 Agent、`delegate_research`。`research.ts` 加 `orchestrate()`，`prompts.ts` 加 `ORCHESTRATOR_PROMPT` |
+| `handoff.ts` | 26 | 交接和防循环、研究助手的三人团队。`agent.ts` 加 `stopOn` |
+| `browser.ts`、`browser-playwright.ts` | 27 | 浏览器工具（无障碍树、编号、网址检查）和 Playwright 的实现 |
+| `skills.ts`、`tool-search.ts` | 28 | skill 加载器、AGENTS.md、按需检索工具。`agent.ts` 每一步重新生成工具定义 |
+| `permissions.ts`、`run-store.ts`、`tools/ask-user.ts` | 29 | 风险分级和权限策略、`ask_user`、暂停的运行存进文件。`agent.ts` 加 `paused` 和 `resumeAgent()` |
+| `deep-research.ts` | 30 | 研究助手 v2：规划 → 确认 → 并行子 Agent → 写报告 → 核查 |
+
+第 27 天用到 Playwright，已经写进根目录的 `package.json`；浏览器要单独下载（`npx playwright install chromium`），没下载时真浏览器的测试自动跳过，CI 里也是这样。
+
+第 22 天起，mock 模型的 `reply()` 可以带 `match`：只回复第一条 user 消息里包含这段文字的请求。并行的子 Agent、同时核查的几句话，请求到达的顺序不固定，用它把回复和请求对上号。
+
+## 第四阶段的代码结构
+
+第 31–40 天接着第 30 天的代码，长成研究助手服务。第 31 天把假互联网从 `tests/web-fixture.ts` 挪到了 `data/web.ts`（`tests/web-fixture.ts` 只剩 vitest 的钩子），评估在测试之外也能启动它；评估集和人工标注放在 `data/eval/`，每天都带着：
+
+| 文件 | 从第几天起 | 内容 |
+|---|---|---|
+| `data/web.ts`、`eval/dataset.ts`、`eval/run.ts`、`eval/env.ts`、`eval/cli.ts`、`data/eval/research.jsonl` | 31 | 假互联网；评估集的 schema、解析和校验；运行器、检查期望、汇总；评估的环境；命令行 |
+| `eval/graders.ts`、`data/eval/judge-labels.jsonl` | 32 | 事实、引用、轨迹三个代码评分器；评分细则评审、两两比较、和人工标注校准、方差。第 37 天加 `safetyGrader` |
+| `eval/regression.ts`、`eval/ci.ts`、`eval/bakeoff.ts`、`ci/eval.yml` | 33 | 评估集的版本、回归对比、门禁、横评；CI 的脚本和工作流模板（`ci/` 只在第 33 天）。`providers.ts` 加 `createAltModel()` |
+| `trace.ts` | 34 | tracer、GenAI 语义约定、OTLP 导出、Langfuse、从 trace 定位失败。`research()` 和 `deepResearch()` 可以传 `tracer`；`tool.ts` 的上下文带上 `call` |
+| `failover.ts`、`deadline.ts`、`checkpoint.ts`、`idempotency.ts`、`testing/faults.ts` | 35 | 递增冷却和故障转移、总时间预算、检查点、幂等、故障注入。`deepResearch()` 加时间预算、优雅降级和检查点；`providers.ts` 加 `createFailoverModel()` |
+| `cost.ts`、`batch.ts`、`eval/optimize.ts` | 36 | 预算、成本分解、缓存省了多少、延迟；批处理接口；两种配置的成本对比。`ResearchSetup` 加 `pageSize` |
+| `injection.ts` | 37 | 可疑文字、污染跟踪和外传检查、清理回答。研究助手默认开启（`guard: false` 关掉）；`data/web.ts` 加三个恶意网页，评估集加 `forbiddenCalls` 和红队用例 |
+| `sandbox.ts`、`security.ts` | 38 | Docker 代码沙箱和 `run_code`；网络白名单、密钥、MCP 工具审核和指纹。`ResearchSetup` 加 `sandbox`、`allowHosts`、`secrets` |
+| `guardrails.ts`、`compliance.ts` | 39 | 敏感信息、输入输出护栏、内容审核、拒答和兜底；生成内容的显式和隐式标识。`saveReport` 可以带标识 |
+
+第 38 天真的 Docker 沙箱的测试，只在本机有 Docker、镜像（默认 `python:3.12-slim` 和 `node:22-alpine`）也已经下载好时才跑，测试不会替学员下载镜像；CI 里一般会跳过。第 37 天起，`data/web.ts` 的网页里可以写 `{{BASE}}`，返回时换成假互联网的地址。
+
 ## 练习怎么写
 
 - **TODO 编号**：按建议的完成顺序编号，跨文件连续编号。文件开头注明「第 N 天的练习：TODO 几到几在哪里。检查：npm run check N」。
@@ -117,6 +156,7 @@ describeE2E('真实模型', () => {
 - `usage`：可以带上 `prompt_tokens_details` 之类的额外字段，会原样返回
 - `chunkDelayMs`：流式返回时每块之间的间隔，用来测试中途取消
 - `disconnectAfter`：流式返回时发完这么多块就断开连接
+- `match`：只回复第一条 user 消息里包含这段文字的请求（第 22 天起）。请求先找对得上的 `match`，找不到再按顺序用没有 `match` 的回复
 
 它还会像真实接口一样检查请求，出问题时返回 400 并用中文说明原因：
 
@@ -145,4 +185,4 @@ npm run check 5                   # 确认练习的初始状态确实会失败
 npm run check 5 -- --solution     # 只测某一天的参考答案
 ```
 
-CI 会在每次 push 和 PR 时运行类型检查和 `npm test`。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`；第 17 天起还要变量 `EMBEDDING_MODEL`（地址和 Key 不配时沿用 `OPENAI_*`）。
+CI 会在每次 push 和 PR 时运行类型检查和 `npm test`（第 27 天真浏览器的测试在 CI 里跳过）。另外每周会用真实模型跑一次 `npm test -- --e2e`，前提是在仓库设置里配好了变量 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和密钥 `OPENAI_API_KEY`；第 8 天起还要 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 和密钥 `ANTHROPIC_API_KEY`；第 17 天起还要变量 `EMBEDDING_MODEL`（地址和 Key 不配时沿用 `OPENAI_*`）；第 22 天起可选的变量 `CHEAP_MODEL`（不配时沿用 `OPENAI_MODEL`）；第 33 天起可选的变量 `ALT_MODEL`、`ALT_BASE_URL` 和密钥 `ALT_API_KEY`（横评用的第二家模型，不配时用 `CHEAP_MODEL`）。

@@ -1,0 +1,34 @@
+// 研究助手的第一版评估集（第 31 天）。一行一条，// 开头的行是注释。
+// 答案只在假互联网（data/web.ts）和本地文档（data/docs/）里：评估要在固定的环境里跑，结果才能前后比较。
+// 第 32 天：几条用例加上了调用轨迹的期望（tools、maxToolCalls）。
+// 字段：id 唯一、不改；question 用户会怎么问；tags 用来分组统计；expected 里写能用代码检查的期望；notes 写给人看的说明。
+// --- 网页上的单个事实 ---
+{"id": "web-release-date", "question": "潮汐协议 3.0 是哪天发布的？", "tags": ["web", "fact"], "expected": {"facts": [["2026 年 3 月 14 日", "3 月 14 日", "2026-03-14"]], "sources": ["/article.html"]}}
+{"id": "web-default-port", "question": "潮汐协议 3.0 的默认端口改成了多少？", "tags": ["web", "fact"], "expected": {"facts": ["7443"], "sources": ["/article.html"]}}
+{"id": "web-handshake", "question": "潮汐协议 3.0 建立连接要握手几次？以前是几次？", "tags": ["web", "fact"], "expected": {"facts": [["1 次", "一次"], ["3 次", "三次"]]}}
+{"id": "web-latency", "question": "潮汐协议 3.0 和 2.x 建立连接的平均延迟分别是多少？", "tags": ["web", "fact"], "expected": {"facts": ["18", "42"], "sources": ["/benchmark.html"], "tools": ["web_search", "fetch_page"]}}
+{"id": "web-throughput", "question": "潮汐协议 3.0 的单机吞吐量比 2.x 高多少？", "tags": ["web", "fact"], "expected": {"facts": ["1.8"], "sources": ["/benchmark.html"]}}
+{"id": "web-upgrade-path", "question": "我们现在用的是潮汐协议 2.3，能直接升级到 3.0 吗？", "tags": ["web", "fact"], "expected": {"facts": ["2.9"], "sources": ["/migration.html"]}}
+{"id": "web-config-rename", "question": "迁移到潮汐协议 3.0 时，handshake.retries 这个配置项要怎么处理？", "tags": ["web", "fact"], "expected": {"facts": ["handshake.attempts"], "sources": ["/migration.html"]}}
+{"id": "web-eol", "question": "潮汐协议 2.x 什么时候停止维护？", "tags": ["web", "fact"], "expected": {"facts": [["2026 年 12 月 31 日", "12 月 31 日", "2026-12-31"]], "sources": ["/migration.html"]}}
+{"id": "web-pro-price", "question": "潮汐云托管专业版每月多少钱？承诺的 SLA 是多少？", "tags": ["web", "fact"], "expected": {"facts": ["499", "99.95"], "sources": ["/pricing.html"], "tools": ["web_search", "fetch_page"]}}
+// --- 本地文档 ---
+{"id": "docs-retries-default", "question": "handshake.retries 的默认值是多少？", "tags": ["docs", "fact"], "expected": {"facts": ["3"], "sources": ["doc:guide/config.md"]}}
+{"id": "docs-reload", "question": "改完 tide-config.yaml 之后，怎么让配置生效？", "tags": ["docs", "fact"], "expected": {"facts": ["tide reload"], "sources": ["doc:guide/config.md"], "maxToolCalls": 4}}
+{"id": "docs-e2077", "question": "网关报 TIDE_E2077 是什么意思，要怎么处理？", "tags": ["docs", "fact"], "expected": {"facts": ["熔断", "30"], "sources": ["doc:ops/errors.md"], "maxToolCalls": 4}}
+{"id": "docs-e1042", "question": "TIDE_E1042 这个错误怎么解决？", "tags": ["docs", "fact"], "expected": {"facts": ["重新签发"], "sources": ["doc:ops/errors.md"]}}
+{"id": "docs-oncall", "question": "半夜线上错误率突然升高，值班的人应该先做什么？", "tags": ["docs", "paraphrase"], "expected": {"facts": ["回滚"], "sources": ["doc:ops/oncall.md"]}}
+{"id": "docs-cert-validity", "question": "客户端证书多久要换一次？", "tags": ["docs", "paraphrase"], "expected": {"facts": ["90"], "sources": ["doc:guide/auth.md"]}}
+{"id": "docs-capacity", "question": "一台 4 核 8G 的机器上，一个网关实例大概能扛多少请求？", "tags": ["docs", "fact"], "expected": {"facts": ["12000"], "sources": ["doc:ops/capacity.md"]}}
+{"id": "docs-predeploy", "question": "服务正式发布之前要做哪些检查？", "tags": ["docs", "paraphrase"], "expected": {"facts": ["证书", "5%"], "sources": ["doc:guide/deploy.md"]}}
+// --- 要把几处资料连起来才能回答 ---
+{"id": "multi-config-upgrade", "question": "我们的配置文档里写着 handshake.retries 默认 3 次。升级到潮汐协议 3.0 以后，这个配置项还能用吗？", "tags": ["web", "docs", "multi-hop"], "expected": {"facts": ["handshake.attempts"], "forbidden": ["可以继续使用", "不用改"], "maxToolCalls": 10}}
+{"id": "multi-port", "question": "潮汐协议 3.0 的默认端口是多少？我们部署文档里 Docker 映射的端口和它一致吗？", "tags": ["web", "docs", "multi-hop"], "expected": {"facts": ["7443"]}}
+{"id": "multi-compare-plans", "question": "潮汐云托管的基础版和专业版有什么区别？五个人的小团队该选哪个？", "tags": ["web", "compare"], "expected": {"facts": ["99", "499"], "sources": ["/pricing.html"]}}
+{"id": "calc-pro-yearly", "question": "潮汐云托管专业版一年要多少钱？", "tags": ["web", "calc"], "expected": {"facts": [["5988", "5,988"]], "tools": ["calculator"]}, "notes": "每月 499 元，乘以 12"}
+// --- 资料里没有答案：应该说没查到，不能编 ---
+{"id": "unanswerable-v4", "question": "潮汐协议 4.0 什么时候发布？", "tags": ["unanswerable"], "expected": {"unanswerable": true}}
+{"id": "unanswerable-enterprise-price", "question": "潮汐网关企业版的技术支持多少钱一年？", "tags": ["unanswerable", "docs"], "expected": {"unanswerable": true, "forbidden": ["499"]}, "notes": "常见问题里只说企业版有 7×24 小时支持，没有价格；不能把托管的价格当成企业版的"}
+{"id": "unanswerable-last-2x", "question": "潮汐协议 2.x 的最后一个版本号是多少？", "tags": ["unanswerable"], "expected": {"unanswerable": true}, "notes": "迁移指南只说要先升级到 2.9，没说 2.9 是不是最后一个版本"}
+// --- 不用查资料的闲聊：不该调用工具 ---
+{"id": "chat-greeting", "question": "你好，你能帮我做什么？", "tags": ["chat"], "expected": {"maxToolCalls": 0, "forbidden": ["[1]"]}}

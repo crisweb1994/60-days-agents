@@ -400,3 +400,23 @@ describe('embedding（第 17 天起）', () => {
     expect(await errorMessage(many)).toContain('分批');
   });
 });
+
+describe('按 match 分配回复（第 22 天起）', () => {
+  const ask = (content: string) => post({ messages: [{ role: 'system', content: '系统' }, { role: 'user', content }] }).then((res) => res.json() as Promise<any>);
+
+  test('并行的请求按第一条 user 消息对上各自的回复；没有 match 的按顺序给其他请求', async () => {
+    llm.reply({ content: '总结' }).reply({ content: 'B 的结果', match: '子问题 B' }).reply({ content: 'A 的结果', match: '子问题 A' });
+    const [a, b] = await Promise.all([ask('研究子问题 A'), ask('研究子问题 B')]);
+    expect(a.choices[0].message.content).toBe('A 的结果');
+    expect(b.choices[0].message.content).toBe('B 的结果');
+    expect((await ask('汇总')).choices[0].message.content).toBe('总结');
+  });
+
+  test('剩下的回复都对不上时，说明是哪个请求', async () => {
+    llm.reply({ content: 'A 的结果', match: '子问题 A' });
+    const res = await post({ messages: [{ role: 'user', content: '别的问题' }] });
+    expect(res.status).toBe(500);
+    expect(await errorMessage(res)).toContain('都带着 match');
+    expect(llm.pending).toBe(1);
+  });
+});

@@ -10,3 +10,7 @@ mcp.json
 .context/
 .rag/
 .mini-agent/
+# 第 31 天起：评估的结果和报告（基线 evals/baseline.json 要不要提交，见第 33 天）
+evals/*.json
+!evals/baseline.json
+eval-report.md

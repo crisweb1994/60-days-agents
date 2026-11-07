@@ -82,6 +82,11 @@ export interface MockReply {
   chunkDelayMs?: number;
   /** 流式返回时，发完这么多块就直接断开连接，模拟传到一半网络断了 */
   disconnectAfter?: number;
+  /**
+   * 只回复第一条 user 消息里包含这段文字的请求（第 22 天起）。并行的请求（比如几个子 Agent 同时调用模型）到达的顺序不固定，
+   * 用它把回复和请求对上号。请求先找对得上的 match，找不到再按顺序用没有 match 的回复
+   */
+  match?: string;
 }
 
 export interface MockFailure {
@@ -200,16 +205,18 @@ export async function startMockLLM(): Promise<MockLLM> {
     if (protocol === 'openai') requests.push(body as ChatRequest);
     else anthropicRequests.push(body as AnthropicRequest);
 
-    const turn = turns.shift();
     const count = requests.length + anthropicRequests.length;
-    if (!turn) {
-      return sendError(
-        res,
-        protocol,
-        500,
-        `mock 脚本已用完：测试只准备了 ${scripted} 轮回复，这已经是第 ${count} 个请求。Agent 是不是多调用了一次模型，或者陷入了循环？`,
-      );
+    const first = firstUserText(body, protocol);
+    const matchOf = (turn: Turn) => ('reply' in turn ? turn.reply.match : undefined);
+    let index = turns.findIndex((turn) => matchOf(turn) !== undefined && first.includes(matchOf(turn)!));
+    if (index === -1) index = turns.findIndex((turn) => matchOf(turn) === undefined);
+    if (index === -1) {
+      const unmatched = turns.length
+        ? `还剩 ${turns.length} 轮回复，但都带着 match，没有一条对得上这个请求的第一条 user 消息：「${first.slice(0, 60)}」`
+        : `测试只准备了 ${scripted} 轮回复，这已经是第 ${count} 个请求。Agent 是不是多调用了一次模型，或者陷入了循环？`;
+      return sendError(res, protocol, 500, `mock 脚本已用完：${unmatched}`);
     }
+    const [turn] = turns.splice(index, 1);
     const { delayMs } = 'reply' in turn ? turn.reply : turn.failure;
     if (delayMs) await sleep(delayMs, undefined, { signal });
     if ('failure' in turn) return sendFailure(req, res, protocol, turn.failure);
@@ -464,6 +471,17 @@ function validateResponseFormat(body: ChatRequest): string | undefined {
 }
 
 const estimate = (value: string) => Math.max(1, Math.ceil(value.length / 4));
+
+/** 请求里第一条 user 消息的文字，用来匹配带 match 的回复 */
+function firstUserText(body: ChatRequest | AnthropicRequest, protocol: Protocol): string {
+  const message = (body.messages as { role: string; content?: unknown }[]).find((m) => m.role === 'user');
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (protocol === 'anthropic' && Array.isArray(content)) {
+    return content.map((block: { type?: string; text?: string }) => (block.type === 'text' ? (block.text ?? '') : '')).join('');
+  }
+  return '';
+}
 
 function tryParse(json: string): unknown {
   try {

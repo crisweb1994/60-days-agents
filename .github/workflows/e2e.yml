@@ -5,6 +5,8 @@ name: E2E
 #   变量 OPENAI_BASE_URL、OPENAI_MODEL，密钥 OPENAI_API_KEY
 #   变量 ANTHROPIC_BASE_URL、ANTHROPIC_MODEL，密钥 ANTHROPIC_API_KEY（第 8 天起用到）
 #   变量 EMBEDDING_MODEL，可选的变量 EMBEDDING_BASE_URL 和密钥 EMBEDDING_API_KEY（第 17 天起用到，不配时沿用 OPENAI_*）
+#   可选的变量 CHEAP_MODEL（第 22 天起用来分类，不配时沿用 OPENAI_MODEL）
+#   可选的变量 ALT_BASE_URL、ALT_MODEL 和密钥 ALT_API_KEY（第 33 天起横评用的第二家模型，不配时用 CHEAP_MODEL）
 # 没配置 OPENAI_MODEL 之前，这个任务会自动跳过。
 on:
   schedule:
@@ -25,6 +27,10 @@ jobs:
       EMBEDDING_BASE_URL: ${{ vars.EMBEDDING_BASE_URL }}
       EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      CHEAP_MODEL: ${{ vars.CHEAP_MODEL }}
+      ALT_BASE_URL: ${{ vars.ALT_BASE_URL }}
+      ALT_MODEL: ${{ vars.ALT_MODEL }}
+      ALT_API_KEY: ${{ secrets.ALT_API_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

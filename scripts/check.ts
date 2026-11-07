@@ -19,6 +19,8 @@ const MODEL_ENV = [...OPENAI_ENV, ...ANTHROPIC_ENV];
 const EMBEDDING_ENV = ['EMBEDDING_BASE_URL', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL'];
 // 联网搜索的 Key（第 12 天起）。测试用本地的假搜索服务，mock 模式下也不传给测试
 const SEARCH_ENV = ['SEARCH_PROVIDER', 'TAVILY_API_KEY', 'BOCHA_API_KEY', 'BRAVE_API_KEY'];
+// 可选的配置：便宜的模型（第 22 天起）、第二家模型（第 33 天起）、单价、Langfuse（第 34 天起）。不填时代码有退路
+const OPTIONAL_ENV = ['CHEAP_MODEL', 'CHEAP_PRICE', 'ALT_BASE_URL', 'ALT_API_KEY', 'ALT_MODEL', 'ALT_PRICE', 'OPENAI_PRICE', 'LANGFUSE_BASE_URL', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY'];
 const root = join(import.meta.dirname, '..');
 
 function exit(message: string): never {
@@ -85,7 +87,7 @@ const env: NodeJS.ProcessEnv = {
   CHECK_TARGET: values.solution ? 'solution' : 'exercise',
 };
 // mock 模式绝不碰真实接口：就算终端里设置了这些变量，也不传给测试
-if (!values.e2e) for (const key of [...MODEL_ENV, ...EMBEDDING_ENV, ...SEARCH_ENV]) delete env[key];
+if (!values.e2e) for (const key of [...MODEL_ENV, ...EMBEDDING_ENV, ...SEARCH_ENV, ...OPTIONAL_ENV]) delete env[key];
 
 const subject = values.solution ? '参考答案' : '练习';
 const model = values.e2e ? `真实模型 ${process.env.OPENAI_MODEL}` : 'mock 模型';
