@@ -1,0 +1,14 @@
+# 构建上下文里不要的东西。和 Dockerfile 同名加 .dockerignore，构建时自动使用
+.git
+node_modules
+**/.env
+**/.env.*
+!**/.env.example
+workspace
+**/.context
+**/.rag
+**/.mini-agent
+evals
+coverage
+*.log
+.DS_Store

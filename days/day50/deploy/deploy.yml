@@ -1,0 +1,61 @@
+# 第 48 天：自动发布的 GitHub Actions 模板。复制到仓库的 .github/workflows/deploy.yml 再改。
+# 流程：测试通过 → 构建镜像、推到镜像仓库 → SSH 到服务器拉新镜像、滚动重启 → 冒烟测试。
+# 要先在仓库的 Settings → Secrets and variables → Actions 里配置：
+#   变量 REGISTRY（比如 ghcr.io 或者 registry.cn-hangzhou.aliyuncs.com）、IMAGE（比如 ghcr.io/you/research-assistant）、DEPLOY_HOST、DEPLOY_USER
+#   密钥 REGISTRY_USERNAME、REGISTRY_PASSWORD、DEPLOY_SSH_KEY
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run check 48 -- --solution
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: meta
+        run: echo "tag=${{ vars.IMAGE }}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login "${{ vars.REGISTRY }}" -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+      # 用提交号做标签，不用 latest：出了问题知道线上跑的是哪个版本，也能回滚到上一个
+      - run: docker build -f days/day50/deploy/Dockerfile -t "${{ steps.meta.outputs.tag }}" .
+      - run: docker push "${{ steps.meta.outputs.tag }}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          install -m 600 /dev/null key && echo "${{ secrets.DEPLOY_SSH_KEY }}" > key
+          ssh -i key -o StrictHostKeyChecking=accept-new "${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}" \
+            "cd ~/research-assistant && IMAGE='${{ needs.build.outputs.tag }}' docker compose -f days/day50/deploy/docker-compose.yml --env-file days/day50/deploy/.env.production pull web worker \
+             && IMAGE='${{ needs.build.outputs.tag }}' docker compose -f days/day50/deploy/docker-compose.yml --env-file days/day50/deploy/.env.production up -d --no-deps web worker"
+      # 冒烟测试：新版本起来了、能接活，否则这一步失败，你会收到通知
+      - run: |
+          for i in $(seq 1 30); do
+            curl -fsS "http://${{ vars.DEPLOY_HOST }}/readyz" && exit 0
+            sleep 2
+          done
+          exit 1

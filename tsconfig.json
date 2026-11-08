@@ -12,5 +12,7 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["days", "shared", "scripts", "vitest.config.ts"]
+  "include": ["days", "shared", "scripts", "vitest.config.ts"],
+  // 第 53 天起的示例仓库是 review-bot 要审查的代码，里面故意留着 bug
+  "exclude": ["days/*/data/repo"]
 }

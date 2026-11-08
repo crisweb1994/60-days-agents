@@ -119,6 +119,27 @@ days/day05/
 - 第 45 天的 Redis + BullMQ：设了 `REDIS_URL` 时才跑
 - 第 46 天的真 PostgreSQL：设了 `DATABASE_URL` 时才跑；其余的数据库测试都用 PGlite，不需要装数据库
 
+## 第六阶段的代码结构
+
+第 51–60 天是毕业项目：学员在自己的仓库里做自己选题的产品，课程这边每天给当天要用的工具（带 TODO 和测试）、模板（`templates/`），并用一个示例项目 **review-bot**（PR 审查机器人）贯穿第 51–57 天的讲义。从这一阶段起不再带着研究助手的全部代码：
+
+| 天 | 文件 | 内容 |
+|---|---|---|
+| 51 | `spec.ts`、`eval-set.ts`、`cli.ts`、`example/spec.md`、`data/review.jsonl` | 需求说明（Markdown 里的 json 代码块）的检查、评估集的覆盖检查、按编号哈希分开发集和测试集；review-bot 的需求说明和评估集 |
+| 52 | `design.ts`、`cli.ts`、`example/design.md` | 工具清单、致命三要素、审查规则、成本估算；review-bot 的设计文档 |
+| 53 | `core/`、`diff.ts`、`repo.ts`、`tools.ts`、`mcp-server.ts`、`data/repo/` | 从研究助手拿出来的 Agent 内核（`providers.ts` 精简过）；diff 解析、安全地读仓库、五个审查工具和草稿、把 Tool 挂到 MCP 服务器上；被审查的示例仓库 |
+| 54 | `prompts.ts`、`review.ts`、`eval/run.ts`、`eval/cli.ts` | 每个文件一个 Agent、汇总、总结；逐条判断用例过没过 |
+| 55 | `eval/score.ts`、`eval/triage.ts`、`eval/iterate.ts`、`data/spec.md` | 分数、失败分类、迭代记录、对照成功标准、过拟合；`prompts.ts` 改了一轮 |
+| 56 | `webhook.ts`、`spend-guard.ts`、`preflight.ts`、`github.ts`、`app.ts` | 验签、过滤、去重；按天按月的花费上限；密钥扫描和上线清单；GitHub webhook 服务 |
+| 57 | `release.ts`、`cli.ts`、`example/README.md` | README 检查、约定式提交、版本号、更新日志、package.json 检查 |
+| 58 | `estimate.ts` | 峰值、并发、限流、容量规划、关键路径 |
+| 59 | `drills/` | 五道手写题：Agent 循环、SSE、并发上限、退避重试、历史裁剪 |
+| 60 | `showcase.ts` | 检查并添加学员作品墙的一行 |
+
+第 50 天是第五阶段的里程碑，接着第 49 天的代码：`product.ts`（登录、限流、配额、灰度选 prompt、后台任务、反馈、记账、告警、管理统计）、`pilot.ts`（试用记录的分拣和报告）；`jobs.ts` 记下 prompt 的版本、变体和用量，`worker.ts` 按版本取 prompt，`server-main.ts` 换成了 product.ts。
+
+示例仓库 `days/*/data/repo/` 里故意留着 bug（它是 review-bot 要审查的代码），`tsconfig.json` 把它排除在类型检查之外。它是用一个脚本从「改动前」和「改动后」两份代码生成 diff 的，改了仓库里的文件，要同时改 `review.jsonl` 里的 diff 和期望的行号。
+
 ## 练习怎么写
 
 - **TODO 编号**：按建议的完成顺序编号，跨文件连续编号。文件开头注明「第 N 天的练习：TODO 几到几在哪里。检查：npm run check N」。
