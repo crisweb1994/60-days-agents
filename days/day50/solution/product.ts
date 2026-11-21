@@ -288,8 +288,12 @@ export function createProductApp(options: ProductOptions) {
         let userId: string | undefined;
         if (pathname === '/api/signup') {
           if (inviteCodes && !inviteCodes.includes(invite ?? '')) throw new HttpError(403, '现在是邀请试用，需要邀请码');
-          userId = (await createUser(db, email, password, scrypt).catch(() => undefined))?.id;
-          if (!userId) throw new HttpError(409, '这个邮箱已经注册过了');
+          try {
+            userId = (await createUser(db, email, password, scrypt)).id;
+          } catch (error) {
+            if ((error as { code?: string })?.code === '23505') throw new HttpError(409, '这个邮箱已经注册过了');
+            throw error;
+          }
         } else {
           userId = await login(db, email, password);
           if (!userId) throw new HttpError(401, '邮箱或密码不对');

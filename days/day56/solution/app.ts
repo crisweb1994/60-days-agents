@@ -137,14 +137,19 @@ if (import.meta.main) {
     model: guardedModel({ primary, cheap }, { primary: price, cheap: parsePrice(process.env.CHEAP_PRICE) ?? price }, guard),
     guard,
     allowedRepos: process.env.ALLOWED_REPOS?.split(',').map((r) => r.trim()).filter(Boolean),
-    // 浅克隆到临时目录。令牌放在请求头里，不拼进网址（网址会出现在 git 的错误信息和进程列表里）
+    // 浅克隆到临时目录。令牌通过 GIT_CONFIG_* 环境变量放进请求头，不拼进网址、也不放进命令行参数（避免出现在 git 报错和 ps 进程列表里）
     checkout: async (repo, sha) => {
       for (const old of checkouts.splice(0)) await rm(old, { recursive: true, force: true });
       const dir = await mkdtemp(join(tmpdir(), 'review-'));
       checkouts.push(dir);
-      const auth = ['-c', `http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`];
+      const gitEnv = {
+        ...process.env,
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'http.extraHeader',
+        GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+      };
       await run('git', ['init', '-q', dir]);
-      await run('git', [...auth, '-C', dir, 'fetch', '-q', '--depth', '1', `https://github.com/${repo}.git`, sha]);
+      await run('git', ['-C', dir, 'fetch', '-q', '--depth', '1', `https://github.com/${repo}.git`, sha], { env: gitEnv });
       await run('git', ['-C', dir, '-c', 'core.symlinks=false', 'checkout', '-q', 'FETCH_HEAD']);
       return dir;
     },
@@ -152,5 +157,11 @@ if (import.meta.main) {
   });
   const server = createServer((req, res) => void bot.handle(req, res));
   server.listen(Number(process.env.PORT ?? 8080), () => console.log(`review-bot 在 ${process.env.PORT ?? 8080} 端口等 webhook`));
-  process.once('SIGTERM', () => server.close(() => void bot.idle().then(() => process.exit(0))));
+  const cleanup = async () => {
+    await bot.idle();
+    for (const old of checkouts.splice(0)) await rm(old, { recursive: true, force: true });
+  };
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => server.close(() => void cleanup().then(() => process.exit(0))));
+  }
 }

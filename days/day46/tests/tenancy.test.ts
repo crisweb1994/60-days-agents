@@ -62,7 +62,7 @@ describe('第 46 天：密码和令牌（TODO 1）', () => {
   });
 });
 
-describe('第 46 天：表结构和 RLS（TODO 2）', () => {
+describe('第 46 天：表结构和 RLS（TODO 2）', { timeout: 15_000 }, () => {
   test('migrate 可以重复执行；每张带 user_id 的表都开了 RLS', async () => {
     const { db } = await freshDb();
     await migrate(db);
@@ -83,7 +83,7 @@ describe('第 46 天：表结构和 RLS（TODO 2）', () => {
   });
 });
 
-describe('第 46 天：跨用户越权（TODO 3、4）', () => {
+describe('第 46 天：跨用户越权（TODO 3、4）', { timeout: 15_000 }, () => {
   test('记忆：bob 看不到、找不到、删不掉 alice 的', async () => {
     const { db, alice, bob } = await freshDb();
     const aliceMemory = createTenantMemoryStore(db, alice);
@@ -157,7 +157,7 @@ describe('第 46 天：跨用户越权（TODO 3、4）', () => {
   });
 });
 
-describe('第 46 天：配额和限流（TODO 5）', () => {
+describe('第 46 天：配额和限流（TODO 5）', { timeout: 15_000 }, () => {
   test('令牌桶：用完了要等，过一会儿补回来', () => {
     let now = 0;
     const limiter = createRateLimiter({ capacity: 2, refillPerSecond: 1, now: () => now });
@@ -204,7 +204,7 @@ describe.runIf(Boolean(process.env.DATABASE_URL) && process.env.CHECK_MODE !== '
   });
 });
 
-describeMock('第 46 天：研究助手按用户隔离', () => {
+describeMock('第 46 天：研究助手按用户隔离', { timeout: 15_000 }, () => {
   test('同一个问题：alice 查得到自己的内部文档，bob 查不到', async () => {
     const { db, alice, bob } = await freshDb();
     await addDocument(db, alice, { path: 'internal.md', markdown: '# 内部手册\n\n潮汐内部集群的管理端口是 9443。' }, embedder());

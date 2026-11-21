@@ -40,7 +40,7 @@ export function createOpenAIEmbedder(config: EmbeddingConfig): Embedder {
   const { baseURL, apiKey, model, batchSize = 16, dimensions } = config;
 
   async function embedBatch(input: string[], signal?: AbortSignal): Promise<number[][]> {
-    const res = await fetch(`${baseURL}/embeddings`, {
+    const res = await fetch(`${baseURL.replace(/\/+$/, '')}/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, input, ...(dimensions ? { dimensions } : {}) }),

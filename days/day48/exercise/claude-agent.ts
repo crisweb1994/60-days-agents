@@ -279,7 +279,7 @@ export const SPECIALIST_PROMPT = `你是潮汐协议的文档专员。回答问�
  * 组装 query 的选项：
  * - cwd 是文档目录；系统提示词用 Claude Code 的预设，后面追加 SPECIALIST_PROMPT
  * - settingSources: []：不读本机的 ~/.claude、项目的 .claude 配置。服务器上跑的 Agent 不能被开发者本机的设置影响
- * - allowedTools 只预先允许只读的工具和 MCP 的工具；disallowedTools 去掉执行命令以外不需要的危险工具
+ * - allowedTools 只预先允许 MCP 的工具（Read、Grep、Glob 不放进去，避免绕过 canUseTool 的目录白名单）；disallowedTools 去掉写文件的工具
  * - canUseTool 是 createPermissionGate；hooks 是审计加命令护栏
  * - env：ANTHROPIC_BASE_URL、ANTHROPIC_API_KEY 原样传，ANTHROPIC_MODEL 作为 model
  */
@@ -292,7 +292,7 @@ export function buildSpecialistOptions(config: SpecialistConfig): Options {
     systemPrompt: { type: 'preset', preset: 'claude_code', append: SPECIALIST_PROMPT },
     settingSources: [],
     ...(env.ANTHROPIC_MODEL ? { model: env.ANTHROPIC_MODEL } : {}),
-    allowedTools: ['Read', 'Grep', 'Glob', ...mcpTools],
+    allowedTools: [...mcpTools],
     disallowedTools: ['Write', 'Edit', 'NotebookEdit'],
     permissionMode: 'default',
     canUseTool: createPermissionGate({ readRoots: [docsRoot], ask, allow: mcpTools }),

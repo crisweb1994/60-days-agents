@@ -175,7 +175,7 @@ async function main() {
   logger.info('config', describeConfig(config));
 
   const { dirname, join } = await import('node:path');
-  const { mkdir, mkdtemp } = await import('node:fs/promises');
+  const { mkdir } = await import('node:fs/promises');
   const { createPgDb, createPgliteDb, migrate } = await import('./db.ts');
   const { migrateFiles } = await import('./ingest.ts');
   const { createFsObjectStore } = await import('./uploads.ts');
@@ -185,7 +185,9 @@ async function main() {
   const { createMemoryJobStore, createMemoryQueue, recoverJobs } = await import('./jobs.ts');
   const { createModel } = await import('./providers.ts');
   const { createOpenAIEmbedder, embeddingConfigFromEnv } = await import('./rag/embeddings.ts');
+  const { searchProviderFromEnv } = await import('./search.ts');
   const { parseApiKeys } = await import('./service.ts');
+  const { createTenantMemoryStore, createTenantRetriever } = await import('./tenant-store.ts');
   const { visionConfigFromEnv } = await import('./vision.ts');
 
   const db = config.DATABASE_URL ? createPgDb(config.DATABASE_URL) : await createPgliteDb();
@@ -194,8 +196,25 @@ async function main() {
   await mkdir(config.OBJECT_DIR, { recursive: true });
   const workspaceRoot = join(config.OBJECT_DIR, '..', 'workspace');
   await mkdir(workspaceRoot, { recursive: true });
+  let embedder: ReturnType<typeof createOpenAIEmbedder> | undefined;
+  try {
+    embedder = createOpenAIEmbedder(embeddingConfigFromEnv());
+  } catch {
+    embedder = undefined;
+    logger.info('files route disabled', { reason: 'EMBEDDING_MODEL not configured' });
+  }
   const model = createModel('openai');
-  const makeSetup = async () => ({ workspace: await mkdtemp(join(workspaceRoot, 'run-')) });
+  const search = searchProviderFromEnv();
+  const makeSetup = async (job: { userId: string }) => {
+    const dir = join(workspaceRoot, 'users', job.userId.replace(/[^\w.-]/g, '_'));
+    await mkdir(dir, { recursive: true });
+    return {
+      workspace: dir,
+      search,
+      memory: createTenantMemoryStore(db, job.userId),
+      ...(embedder ? { docs: { root: dir, retriever: createTenantRetriever(db, job.userId, embedder) } } : {}),
+    };
+  };
   // 第 50 天：prompt 的版本、指标、反馈
   const { openPromptRegistry } = await import('./prompt-registry.ts');
   const { RESEARCH_PROMPT } = await import('./prompts.ts');
@@ -239,7 +258,6 @@ async function main() {
   }
   closers.push({ name: 'database', close: () => db.close() });
 
-  const embedder = createOpenAIEmbedder(embeddingConfigFromEnv());
   let vision;
   try {
     vision = visionConfigFromEnv();
@@ -270,7 +288,7 @@ async function main() {
       ? []
       : [
           { prefix: '/v1/jobs', handle: createJobsApp({ store, queue, apiKeys: parseApiKeys(process.env.SERVICE_API_KEYS) }) },
-          { prefix: '/v1/files', handle: createFilesApp({ db, store: createFsObjectStore(config.OBJECT_DIR), embedder, vision }).handle },
+          ...(embedder ? [{ prefix: '/v1/files', handle: createFilesApp({ db, store: createFsObjectStore(config.OBJECT_DIR), embedder, vision }).handle }] : []),
           { prefix: '/', handle: product },
         ];
   // 指标记在执行任务的进程里（withOps），告警也在那里检查。web 和 worker 分开部署时，管理统计看不到 worker 的指标：

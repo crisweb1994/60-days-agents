@@ -54,12 +54,16 @@ export function createResearchRunner(options: ResearchWorkerOptions): JobRunner 
     await store.update(jobId, { status: 'running', attempts: attempt });
     const checkpoint = job.mode === 'deep' && checkpointDir ? await openCheckpoint(join(checkpointDir, `${jobId}.json`)) : undefined;
 
-    let writes = Promise.resolve();
-    const save = (chunk: ResearchChunk) => {
-      writes = writes.then(async () => void (await store.appendEvent(jobId, chunk)));
-    };
     let answer: AnswerData | undefined;
     let failure: unknown;
+    let writes = Promise.resolve();
+    const save = (chunk: ResearchChunk) => {
+      writes = writes
+        .then(async () => void (await store.appendEvent(jobId, chunk)))
+        .catch((error) => {
+          failure ??= error;
+        });
+    };
     let usage = job.usage ?? emptyUsage();
     const system = await systemFor?.(job);
     await streamResearch(

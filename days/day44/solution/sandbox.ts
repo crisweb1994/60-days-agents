@@ -8,6 +8,7 @@
 // 运行：node days/day38/solution/sandbox.ts python "print(sum(range(10)))"
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import { defineTool, truncate } from './tool.ts';
 
@@ -78,7 +79,7 @@ export function dockerArgs(language: Language, name: string, options: SandboxOpt
     'no-new-privileges',
     '--user',
     '65534:65534',
-    ...(workspace ? ['-v', `${workspace}:/workspace:ro`, '-w', '/workspace'] : []),
+    ...(workspace ? ['-v', `${resolve(workspace)}:/workspace:ro`, '-w', '/workspace'] : []),
     image,
     ...COMMANDS[language],
   ];
@@ -99,13 +100,22 @@ export type Runner = (command: string, args: string[], options: { input: string;
 export const spawnRunner: Runner = (command, args, { input, timeoutMs, onTimeout }) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let timedOut = false;
-    // 输出太多也要截住，免得一段 while(true) print 把内存吃光
+    // 输出太多也要截住，免得一段 while(true) print 把内存吃光；按字节收集最后统一解码，避免截断多字节 UTF-8 字符
     const LIMIT = 1_000_000;
-    child.stdout.on('data', (d) => (stdout = (stdout + d).slice(0, LIMIT)));
-    child.stderr.on('data', (d) => (stderr = (stderr + d).slice(0, LIMIT)));
+    const collect = (chunks: Buffer[], getBytes: () => number, setBytes: (n: number) => void) => (d: Buffer) => {
+      const remain = LIMIT - getBytes();
+      if (remain <= 0) return;
+      const slice = d.length > remain ? d.subarray(0, remain) : d;
+      chunks.push(slice);
+      setBytes(getBytes() + slice.length);
+    };
+    child.stdout.on('data', collect(stdoutChunks, () => stdoutBytes, (n) => (stdoutBytes = n)));
+    child.stderr.on('data', collect(stderrChunks, () => stderrBytes, (n) => (stderrBytes = n)));
     const timer = setTimeout(async () => {
       timedOut = true;
       await onTimeout?.().catch(() => {});
@@ -117,7 +127,7 @@ export const spawnRunner: Runner = (command, args, { input, timeoutMs, onTimeout
     });
     child.on('close', (exitCode) => {
       clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode, timedOut });
+      resolve({ stdout: Buffer.concat(stdoutChunks).toString('utf8'), stderr: Buffer.concat(stderrChunks).toString('utf8'), exitCode, timedOut });
     });
     child.stdin.on('error', () => {}); // 进程提前退出时，写标准输入会报 EPIPE，忽略
     child.stdin.end(input);

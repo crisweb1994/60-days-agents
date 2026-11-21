@@ -164,17 +164,19 @@ describe('第 43 天：组装（TODO 5、6）', () => {
     expect(mcpToolName('research', 'calculator')).toBe('mcp__research__calculator');
   });
 
-  test('buildSpecialistOptions：隔离本机配置；只预先允许只读的工具；hooks 和权限都接上', async () => {
+  test('buildSpecialistOptions：隔离本机配置；Read/Grep/Glob 走 canUseTool 限目录；hooks 和权限都接上', async () => {
     const audit = await openAuditLog(join(await tmp(), 'a.jsonl'));
     const options = buildSpecialistOptions({ docsRoot: DOCS, audit, researchTools: [calculator], env: { ANTHROPIC_BASE_URL: 'http://x', ANTHROPIC_API_KEY: 'k', ANTHROPIC_MODEL: 'my-model' } });
     expect(options).toMatchObject({ cwd: DOCS, settingSources: [], model: 'my-model', permissionMode: 'default', maxTurns: 20 });
-    expect(options.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'mcp__research__calculator']);
+    expect(options.allowedTools, 'Read/Grep/Glob 不能放进 allowedTools，否则会绕过 canUseTool 的目录限制').toEqual(['mcp__research__calculator']);
     expect(options.disallowedTools).toEqual(['Write', 'Edit', 'NotebookEdit']);
     expect(options.env).toMatchObject({ ANTHROPIC_BASE_URL: 'http://x', ANTHROPIC_API_KEY: 'k' });
     expect(options.systemPrompt).toMatchObject({ type: 'preset', preset: 'claude_code', append: c.SPECIALIST_PROMPT });
     expect(Object.keys(options.hooks!).sort()).toEqual(['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionEnd', 'UserPromptSubmit']);
     expect(options.hooks!.PreToolUse!.map((m) => m.matcher ?? '*'), '先审计，再护栏').toEqual(['*', 'Bash']);
     expect(Object.keys(options.mcpServers!)).toEqual(['research']);
+    expect(await options.canUseTool!('Read', { file_path: join(DOCS, 'faq.md') }, { signal, toolUseID: 'u' } as never)).toMatchObject({ behavior: 'allow' });
+    expect(await options.canUseTool!('Read', { file_path: '/etc/passwd' }, { signal, toolUseID: 'u' } as never)).toMatchObject({ behavior: 'deny' });
     expect(await options.canUseTool!('Bash', { command: 'ls' }, { signal, toolUseID: 'u' } as never)).toMatchObject({ behavior: 'deny' });
     expect(buildSpecialistOptions({ docsRoot: DOCS, audit, env: {} }).mcpServers, '没有研究工具就不开 MCP 服务器').toBeUndefined();
   });

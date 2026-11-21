@@ -3,7 +3,7 @@
 // 版本号是「名字@内容的 sha256 前 8 位」：内容一样，版本号就一样，重复发布不会多出一个版本。
 // 标签（production、canary）指向某个版本，切换标签就是上线和回滚；每个标签记着历史，回滚就是退回上一个。
 // 这里存在一个 JSON 文件里；线上放进数据库，和第 46 天的其他表一样。
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -59,8 +59,9 @@ export async function openPromptRegistry(file: string, now: () => Date = () => n
   }
   const save = async () => {
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(`${file}.tmp`, JSON.stringify(data, null, 2));
-    await rename(`${file}.tmp`, file);
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    await writeFile(tmp, JSON.stringify(data, null, 2));
+    await rename(tmp, file);
   };
   const byId = (id: string) => data.versions.find((v) => v.id === id);
   const historyOf = (name: string, label: string) => ((data.labels[name] ??= {})[label] ??= []);

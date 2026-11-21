@@ -9,8 +9,8 @@
 // 需要 Redis：docker run -d -p 6379:6379 redis:7，然后设 REDIS_URL=redis://localhost:6379
 import { Queue, Worker } from 'bullmq';
 import { randomUUID } from 'node:crypto';
-import { Redis } from 'ioredis';
-import type { JobEvent, JobQueue, JobRecord, JobRunner, JobStatus, JobStore } from './jobs.ts';
+import { Redis, type RedisOptions } from 'ioredis';
+import { FINAL_STATUSES, type JobEvent, type JobQueue, type JobRecord, type JobRunner, type JobStatus, type JobStore } from './jobs.ts';
 
 const PREFIX = 'research';
 const jobKey = (id: string) => `${PREFIX}:job:${id}`;
@@ -18,9 +18,18 @@ const statusKey = (status: JobStatus) => `${PREFIX}:status:${status}`;
 const eventsKey = (id: string) => `${PREFIX}:events:${id}`;
 const CANCEL_CHANNEL = `${PREFIX}:cancel`;
 
-export function createRedisJobStore(redisUrl: string, now: () => Date = () => new Date()): JobStore & { close(): Promise<void> } {
-  const redis = new Redis(redisUrl);
-  const sub = new Redis(redisUrl);
+function connectRedis(redisUrl: string, options?: RedisOptions) {
+  const client = options ? new Redis(redisUrl, options) : new Redis(redisUrl);
+  // 避免短暂断连触发 Node 未捕获的 error 事件导致进程崩溃
+  client.on('error', () => {});
+  return client;
+}
+
+const DEFAULT_JOB_TTL_SECONDS = 7 * 86_400;
+
+export function createRedisJobStore(redisUrl: string, now: () => Date = () => new Date(), ttlSeconds = DEFAULT_JOB_TTL_SECONDS): JobStore & { close(): Promise<void> } {
+  const redis = connectRedis(redisUrl);
+  const sub = connectRedis(redisUrl);
   const listeners = new Map<string, Set<(event: JobEvent) => void>>();
   sub.on('message', (channel: string, message: string) => {
     const id = channel.slice(eventsKey('').length);
@@ -45,6 +54,7 @@ export function createRedisJobStore(redisUrl: string, now: () => Date = () => ne
       const next: JobRecord = { ...job, ...patch, updatedAt: now().toISOString() };
       const tx = redis.multi().set(jobKey(id), JSON.stringify(next));
       if (next.status !== job.status) tx.srem(statusKey(job.status), id).sadd(statusKey(next.status), id);
+      if (FINAL_STATUSES.has(next.status) && ttlSeconds > 0) tx.expire(jobKey(id), ttlSeconds).expire(eventsKey(id), ttlSeconds);
       await tx.exec();
       return next;
     },
@@ -96,7 +106,7 @@ export interface BullQueueOptions {
 export function createBullQueue(options: BullQueueOptions): JobQueue {
   const { redisUrl, store, run, concurrency = 2, maxAttempts = 3, queueName = 'research', worker: startWorker = true } = options;
   // BullMQ 要求 worker 的连接不限制重试次数：worker 要一直阻塞地等新任务
-  const connection = () => new Redis(redisUrl, { maxRetriesPerRequest: null });
+  const connection = () => connectRedis(redisUrl, { maxRetriesPerRequest: null });
   const queue = new Queue(queueName, { connection: connection() });
   const worker = startWorker
     ? new Worker(
@@ -105,10 +115,12 @@ export function createBullQueue(options: BullQueueOptions): JobQueue {
         { connection: connection(), concurrency },
       )
     : undefined;
-  const pub = new Redis(redisUrl);
-  const sub = new Redis(redisUrl);
-  void sub.subscribe(CANCEL_CHANNEL);
-  sub.on('message', (_channel: string, jobId: string) => worker?.cancelJob(jobId, '用户取消了'));
+  const pub = connectRedis(redisUrl);
+  const sub = startWorker ? connectRedis(redisUrl) : undefined;
+  if (sub) {
+    void sub.subscribe(CANCEL_CHANNEL);
+    sub.on('message', (_channel: string, jobId: string) => worker?.cancelJob(jobId, '用户取消了'));
+  }
   return {
     async enqueue(jobId) {
       await queue.add('research', { jobId }, { jobId, attempts: maxAttempts, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 1000, removeOnFail: 1000 });
@@ -134,7 +146,7 @@ export function createBullQueue(options: BullQueueOptions): JobQueue {
     async close() {
       await worker?.close();
       await queue.close();
-      await Promise.all([pub.quit(), sub.quit()]);
+      await Promise.all([pub.quit(), ...(sub ? [sub.quit()] : [])]);
     },
   };
 }

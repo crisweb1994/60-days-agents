@@ -92,9 +92,10 @@ export function createAccumulator() {
 
     /** 全部合并完以后，得到完整的回复 */
     result(): ChatResult {
-      const message: AssistantMessage = { role: 'assistant', content: content || (toolCalls.length ? null : '') };
+      const calls = toolCalls.filter(Boolean);
+      const message: AssistantMessage = { role: 'assistant', content: content || (calls.length ? null : '') };
       if (reasoning) message.reasoning_content = reasoning;
-      if (toolCalls.length) message.tool_calls = toolCalls;
+      if (calls.length) message.tool_calls = calls;
       return { message, finishReason, usage };
     },
   };

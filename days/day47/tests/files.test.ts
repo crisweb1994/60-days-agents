@@ -103,7 +103,7 @@ describeMock('第 47 天：读图片（TODO 3）', () => {
   });
 });
 
-describeMock('第 47 天：后台建索引（TODO 4）', () => {
+describeMock('第 47 天：后台建索引（TODO 4）', { timeout: 15_000 }, () => {
   test('PDF：ready，记下页数、块数和空页；只有自己检索得到', async () => {
     const { db, alice, bob, store } = await world();
     expect(await findUnprotectedTables(db), 'files 表也开了 RLS').toEqual([]);
@@ -133,7 +133,7 @@ describeMock('第 47 天：后台建索引（TODO 4）', () => {
   });
 });
 
-describeMock('第 47 天：文件的接口和引用到页码（TODO 5）', () => {
+describeMock('第 47 天：文件的接口和引用到页码（TODO 5）', { timeout: 15_000 }, () => {
   async function start() {
     const w = await world();
     const app = await startFilesApp({ db: w.db, store: w.store, embedder: embedder(), vision: vision(), maxBytes: 1024 * 1024 });

@@ -4,7 +4,7 @@
 // 标签（production、canary）指向某个版本，切换标签就是上线和回滚；每个标签记着历史，回滚就是退回上一个。
 // 这里存在一个 JSON 文件里；线上放进数据库，和第 46 天的其他表一样。
 // 第 49 天的练习：TODO 1 在这里，TODO 2、6 在 rollout.ts，TODO 3、4 在 metrics.ts，TODO 5 在 feedback.ts。检查：npm run check 49
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -60,8 +60,9 @@ export async function openPromptRegistry(file: string, now: () => Date = () => n
   }
   const save = async () => {
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(`${file}.tmp`, JSON.stringify(data, null, 2));
-    await rename(`${file}.tmp`, file);
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    await writeFile(tmp, JSON.stringify(data, null, 2));
+    await rename(tmp, file);
   };
   const byId = (id: string) => data.versions.find((v) => v.id === id);
   const historyOf = (name: string, label: string) => ((data.labels[name] ??= {})[label] ??= []);

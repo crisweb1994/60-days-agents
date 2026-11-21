@@ -248,7 +248,7 @@ export function createAnthropicModel(config: AnthropicConfig = anthropicConfigFr
   return {
     name: `anthropic:${config.model}`,
     async chat(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResult> {
-      const res = await fetch(`${config.baseURL}/v1/messages`, {
+      const res = await fetch(`${config.baseURL.replace(/\/+$/, '')}/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

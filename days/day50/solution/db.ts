@@ -136,20 +136,24 @@ create table if not exists usage_daily (
  * - 迁移要用管理员角色执行（PGlite 里是超级用户 postgres；线上是一个有 BYPASSRLS 的迁移专用角色），应用平时用 APP_ROLE
  */
 export async function migrate(db: Db): Promise<void> {
-  await db.query(`do $$ begin if not exists (select 1 from pg_roles where rolname = '${APP_ROLE}') then create role ${APP_ROLE} nologin; end if; end $$`);
-  for (const statement of SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) await db.query(statement);
-  await db.query(`grant select on users to ${APP_ROLE}`);
-  for (const table of TENANT_TABLES) {
-    await db.query(`alter table ${table} enable row level security`);
-    await db.query(`alter table ${table} force row level security`);
-    await db.query(`drop policy if exists tenant_isolation on ${table}`);
-    await db.query(`create policy tenant_isolation on ${table} using (user_id = current_setting('app.user_id', true)) with check (user_id = current_setting('app.user_id', true))`);
-    await db.query(`grant select, insert, update, delete on ${table} to ${APP_ROLE}`);
-  }
-  // 登录前按 API Key 的哈希找用户：security definer 函数以所有者的身份执行，只能做这一件事（auth.ts 的 findUserByApiKey）。
-  // search_path 固定住，免得被人用同名的表或函数劫持
-  await db.query(`create or replace function lookup_api_key(key_hash text) returns text language sql stable security definer set search_path = public as $fn$ select user_id from api_keys where hash = key_hash $fn$`);
-  await db.query(`grant execute on function lookup_api_key(text) to ${APP_ROLE}`);
+  await db.transaction(async (tx) => {
+    // 多副本同时启动时用事务级咨询锁排队，避免 drop/create policy 并发冲突
+    await tx.query('select pg_advisory_xact_lock(74430046)');
+    await tx.query(`do $$ begin if not exists (select 1 from pg_roles where rolname = '${APP_ROLE}') then create role ${APP_ROLE} nologin; end if; end $$`);
+    for (const statement of SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) await tx.query(statement);
+    await tx.query(`grant select on users to ${APP_ROLE}`);
+    for (const table of TENANT_TABLES) {
+      await tx.query(`alter table ${table} enable row level security`);
+      await tx.query(`alter table ${table} force row level security`);
+      await tx.query(`drop policy if exists tenant_isolation on ${table}`);
+      await tx.query(`create policy tenant_isolation on ${table} using (user_id = current_setting('app.user_id', true)) with check (user_id = current_setting('app.user_id', true))`);
+      await tx.query(`grant select, insert, update, delete on ${table} to ${APP_ROLE}`);
+    }
+    // 登录前按 API Key 的哈希找用户：security definer 函数以所有者的身份执行，只能做这一件事（auth.ts 的 findUserByApiKey）。
+    // search_path 固定住，免得被人用同名的表或函数劫持
+    await tx.query(`create or replace function lookup_api_key(key_hash text) returns text language sql stable security definer set search_path = public as $fn$ select user_id from api_keys where hash = key_hash $fn$`);
+    await tx.query(`grant execute on function lookup_api_key(text) to ${APP_ROLE}`);
+  });
 }
 
 /**

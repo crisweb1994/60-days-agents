@@ -81,18 +81,18 @@ flowchart TB
   H -- deny --> X[拦下，原因交给模型]
   H --> D{disallowedTools<br/>Write、Edit…}
   D -- 在里面 --> X
-  D --> A{allowedTools<br/>Read、Grep、Glob、MCP 工具}
+  D --> A{allowedTools<br/>MCP 工具}
   A -- 在里面 --> OK[执行]
-  A --> G{canUseTool<br/>按工具和参数判断}
+  A --> G{canUseTool<br/>Read/Grep/Glob 限目录；其余拒绝}
   G -- allow --> OK
   G -- deny --> X
 ```
 
 （具体的判断顺序以官方文档的 permissions 一节为准，上图是今天的配置实际的效果。）
 
-- **`allowedTools` 只放只读的工具**：在它里面的直接放行，不再问 `canUseTool`。所以这里不能放 Bash：放进去就等于「什么命令都能跑」
+- **`allowedTools` 只放信任的 MCP 工具**：在它里面的工具会直接放行，**不再调用 `canUseTool`**。所以这里既不能放 `Bash`，也不能把 `Read`、`Grep`、`Glob` 放进去——否则 `canUseTool` 里的目录白名单会被直接绕过，模型能读到 `docsRoot` 之外的文件（如 `/etc/passwd` 或 `.env`）
 - **`disallowedTools` 去掉写文件的工具**：模型根本看不到它们
-- **`canUseTool` 管剩下的**：[claude-agent.ts](exercise/claude-agent.ts) 的 `createPermissionGate` 按路径判断。Read、Grep、Glob 只能用在文档目录里，用 `relative()` 算相对路径，防住 `../../etc/passwd` 和 `/docs-evil` 这种前缀相同的目录（第 38 天的路径检查）
+- **`canUseTool` 管读目录和其余工具**：[claude-agent.ts](exercise/claude-agent.ts) 的 `createPermissionGate` 按路径判断。Read、Grep、Glob 只能用在文档目录里，用 `relative()` 算相对路径，防住 `../../etc/passwd` 和 `/docs-evil` 这种前缀相同的目录（第 38 天的路径检查）
 - **hooks 是最后一道保险**：`createCommandGuard` 是一个只匹配 Bash 的 PreToolUse hook，命中 `rm -rf`、`sudo`、`curl … | sh` 就返回 `permissionDecision: 'deny'`。就算以后有人把 Bash 加进了 allowedTools，它也还在
 
 拒绝的时候，`message` 和 `permissionDecisionReason` 都会交给模型：和第 11 天一样，告诉它为什么、该怎么办（「告诉用户需要他自己执行」），不然它会换个写法再试。
@@ -215,7 +215,7 @@ npm run check 43 -- --e2e
 
 - Claude Agent SDK 把 Claude Code 的运行时当作库：你通过选项、hooks、MCP 配置和扩展它；它在子进程里运行，用 Anthropic 协议调用模型
 - 它是商业条款，不是开源许可；上线前读条款。`settingSources: []` 隔离本机配置
-- 权限是几层叠起来的：allowedTools 只放只读的工具，disallowedTools 去掉写的，canUseTool 按参数判断，hooks 兜底
+- 权限是几层叠起来的：allowedTools 只放无需按参数校验的 MCP 工具，disallowedTools 去掉写的，canUseTool 按路径和参数把关 Read/Grep/Glob 及其他工具，hooks 兜底
 - 审计日志用 hooks 实现：参数打码、结果只记长度、只追加、哈希链、排队写、失败要报
 - 场景越像「工程师在终端前干活」越适合复用，越像固定的业务流程越该自建
 

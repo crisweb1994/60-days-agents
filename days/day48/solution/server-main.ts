@@ -174,7 +174,7 @@ async function main() {
   logger.info('config', describeConfig(config));
 
   const { join } = await import('node:path');
-  const { mkdir, mkdtemp } = await import('node:fs/promises');
+  const { mkdir } = await import('node:fs/promises');
   const { createPgDb, createPgliteDb, migrate } = await import('./db.ts');
   const { migrateFiles } = await import('./ingest.ts');
   const { createFsObjectStore } = await import('./uploads.ts');
@@ -185,6 +185,7 @@ async function main() {
   const { createMemoryJobStore, createMemoryQueue, recoverJobs } = await import('./jobs.ts');
   const { createModel } = await import('./providers.ts');
   const { createOpenAIEmbedder, embeddingConfigFromEnv } = await import('./rag/embeddings.ts');
+  const { searchProviderFromEnv } = await import('./search.ts');
   const { parseApiKeys } = await import('./service.ts');
   const { visionConfigFromEnv } = await import('./vision.ts');
 
@@ -195,7 +196,12 @@ async function main() {
   const workspaceRoot = join(config.OBJECT_DIR, '..', 'workspace');
   await mkdir(workspaceRoot, { recursive: true });
   const model = createModel('openai');
-  const makeSetup = async () => ({ workspace: await mkdtemp(join(workspaceRoot, 'run-')) });
+  const search = searchProviderFromEnv();
+  const makeSetup = async (job?: { userId?: string }) => {
+    const dir = join(workspaceRoot, 'users', (job?.userId ?? 'anonymous').replace(/[^\w.-]/g, '_'));
+    await mkdir(dir, { recursive: true });
+    return { workspace: dir, search };
+  };
   const runner = (store: import('./jobs.ts').JobStore) => createResearchRunner({ store, model, makeSetup, checkpointDir: join(workspaceRoot, 'checkpoints') });
 
   let store: import('./jobs.ts').JobStore;
@@ -218,7 +224,13 @@ async function main() {
   }
   closers.push({ name: 'database', close: () => db.close() });
 
-  const embedder = createOpenAIEmbedder(embeddingConfigFromEnv());
+  let embedder;
+  try {
+    embedder = createOpenAIEmbedder(embeddingConfigFromEnv());
+  } catch {
+    embedder = undefined;
+    logger.info('files route disabled', { reason: 'EMBEDDING_MODEL not configured' });
+  }
   let vision;
   try {
     vision = visionConfigFromEnv();
@@ -230,7 +242,7 @@ async function main() {
       ? []
       : [
           { prefix: '/v1/jobs', handle: createJobsApp({ store, queue, apiKeys: parseApiKeys(process.env.SERVICE_API_KEYS) }) },
-          { prefix: '/v1/files', handle: createFilesApp({ db, store: createFsObjectStore(config.OBJECT_DIR), embedder, vision }).handle },
+          ...(embedder ? [{ prefix: '/v1/files', handle: createFilesApp({ db, store: createFsObjectStore(config.OBJECT_DIR), embedder, vision }).handle }] : []),
           { prefix: '/', handle: createWebApp({ model, makeSetup }) },
         ];
   const app = await startApp({ routes, checks, logger, port: config.PORT, host: '0.0.0.0', onShutdown: closers, shutdownTimeoutMs: config.SHUTDOWN_TIMEOUT_MS, drainDelayMs: config.NODE_ENV === 'production' ? 5000 : 0 });

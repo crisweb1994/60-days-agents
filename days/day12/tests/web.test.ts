@@ -62,10 +62,10 @@ describe('第 12 天：抓取网页', () => {
 
   test('默认不能访问本机和内网地址', async () => {
     await expect(fetchPage(`${fixture.base}/article.html`)).rejects.toThrow('内网');
-    for (const host of ['localhost', '127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '[::1]']) {
+    for (const host of ['localhost', '127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '[::1]', '[::]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]']) {
       expect(isPrivateHost(host), host).toBe(true);
     }
-    for (const host of ['example.com', '8.8.8.8', '172.32.0.1']) expect(isPrivateHost(host), host).toBe(false);
+    for (const host of ['example.com', '8.8.8.8', '172.32.0.1', '100.128.0.1']) expect(isPrivateHost(host), host).toBe(false);
   });
 });
 

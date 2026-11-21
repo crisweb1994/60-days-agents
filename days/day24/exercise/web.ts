@@ -121,18 +121,34 @@ export interface FetchedPage {
   markdown: string;
 }
 
+function isPrivateIPv4(a: number, b: number): boolean {
+  return (
+    a === 127 ||
+    a === 10 ||
+    a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
 /**
  * 是不是本机或者内网的地址。不让模型访问这些地址：网页里的一句话就可能诱导它去读你内网的服务（SSRF）。
- * 这里只检查网址里写的主机名，域名解析到内网 IP 的情况防不住，第 36 天讲沙箱时再做完整的防护
+ * 这里只检查网址里写的主机名，域名解析到内网 IP 的情况防不住，第 38 天讲沙箱和网络白名单时再做进一步防护
  */
 export function isPrivateHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || host === '0.0.0.0') return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || host === '::' || host === '0.0.0.0') return true;
   if (/^(fc|fd|fe80)/.test(host) && host.includes(':')) return true;
-  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    return isPrivateIPv4(hi >> 8, hi & 0xff);
+  }
+  const ipv4 = host.replace(/^::ffff:/, '').match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (!ipv4) return false;
-  const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-  return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  return isPrivateIPv4(Number(ipv4[1]), Number(ipv4[2]));
 }
 
 /** 从 Content-Type 或者网页开头的 <meta> 里找出编码。不少中文网站还在用 GBK */
@@ -180,13 +196,26 @@ export async function fetchPage(url: string, options: FetchPageOptions = {}): Pr
   if (!allowPrivate && isPrivateHost(parsed.hostname)) throw new Error(`不能访问本机或内网的地址：${parsed.hostname}`);
 
   const timeout = AbortSignal.timeout(timeoutMs);
-  const res = await fetch(parsed, {
-    headers: { 'User-Agent': 'mini-agent/0.12 (research assistant)', Accept: 'text/html,text/plain,text/markdown;q=0.9,*/*;q=0.5' },
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-  }).catch((error: Error) => {
-    if (timeout.aborted) throw new Error(`打开网页超时（${timeoutMs / 1000} 秒）：${url}。可以换搜索结果里的另一个网址`);
-    throw new Error(`打不开这个网址：${url}（${error.message}）。可以换搜索结果里的另一个网址`);
-  });
+  const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const headers = { 'User-Agent': 'mini-agent/0.12 (research assistant)', Accept: 'text/html,text/plain,text/markdown;q=0.9,*/*;q=0.5' };
+  let current = parsed;
+  let res: Response | undefined;
+  // 手动处理跳转：每跳先校验协议和目标主机，防止 302 跳转到本机/内网地址（SSRF）
+  for (let hops = 0; hops <= 5; hops++) {
+    res = await fetch(current, { headers, redirect: 'manual', signal: combinedSignal }).catch((error: Error) => {
+      if (timeout.aborted) throw new Error(`打开网页超时（${timeoutMs / 1000} 秒）：${url}。可以换搜索结果里的另一个网址`);
+      throw new Error(`打不开这个网址：${url}（${error.message}）。可以换搜索结果里的另一个网址`);
+    });
+    if (![301, 302, 303, 307, 308].includes(res.status)) break;
+    const location = res.headers.get('location');
+    await res.body?.cancel();
+    if (!location) break;
+    if (hops === 5) throw new Error(`网页跳转次数太多：${url}。可以换搜索结果里的另一个网址`);
+    current = new URL(location, current);
+    if (current.protocol !== 'http:' && current.protocol !== 'https:') throw new Error(`只能打开 http 和 https 的网址，不支持 ${current.protocol}`);
+    if (!allowPrivate && isPrivateHost(current.hostname)) throw new Error(`网页跳转到了本机或内网的地址，不能访问`);
+  }
+  if (!res) throw new Error(`打不开这个网址：${url}。可以换搜索结果里的另一个网址`);
   if (!res.ok) {
     await res.body?.cancel();
     throw new Error(`HTTP ${res.status}：打不开 ${url}。可以换搜索结果里的另一个网址`);
@@ -198,8 +227,7 @@ export async function fetchPage(url: string, options: FetchPageOptions = {}): Pr
     throw new Error(`这个网址的内容不是网页，而是 ${contentType.split(';')[0]}。fetch_page 只能读网页和纯文本`);
   }
   // 最终的网址可能和请求的不一样（跳转了），相对链接要按最终的网址来解析
-  const finalUrl = res.url || parsed.href;
-  if (!allowPrivate && isPrivateHost(new URL(finalUrl).hostname)) throw new Error(`网页跳转到了本机或内网的地址，不能访问`);
+  const finalUrl = current.href;
   const bytes = await readLimited(res, maxBytes);
   const text = decode(bytes, detectCharset(contentType, bytes.subarray(0, 2048)));
   if (!isHTML) return { url: finalUrl, title: '', markdown: text.trim() };

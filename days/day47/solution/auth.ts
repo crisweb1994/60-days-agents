@@ -27,10 +27,16 @@ export async function hashPassword(password: string, params: ScryptParams = DEFA
 /** 验证密码。格式不对返回 false；用存下来的参数和盐重新算一遍，固定时间比较 */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [kind, N, r, p, salt, hash] = stored.split('$');
-  if (kind !== 'scrypt' || !salt || !hash) return false;
+  const params = { N: Number(N), r: Number(r), p: Number(p) };
+  if (kind !== 'scrypt' || !salt || !hash || !Number.isInteger(params.N) || !Number.isInteger(params.r) || !Number.isInteger(params.p)) return false;
   const expected = Buffer.from(hash, 'base64url');
-  const actual = await scrypt(password.normalize('NFKC'), Buffer.from(salt, 'base64url'), expected.length, { N: Number(N), r: Number(r), p: Number(p) });
-  return timingSafeEqual(actual, expected);
+  if (expected.length === 0) return false;
+  try {
+    const actual = await scrypt(password.normalize('NFKC'), Buffer.from(salt, 'base64url'), expected.length, params);
+    return timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 }
 
 // ---------- 会话令牌 ----------

@@ -92,9 +92,10 @@ export function createAccumulator() {
 
     /** 全部合并完以后，得到完整的回复 */
     result(): ChatResult {
-      const message: AssistantMessage = { role: 'assistant', content: content || (toolCalls.length ? null : '') };
+      const calls = toolCalls.filter(Boolean);
+      const message: AssistantMessage = { role: 'assistant', content: content || (calls.length ? null : '') };
       if (reasoning) message.reasoning_content = reasoning;
-      if (toolCalls.length) message.tool_calls = toolCalls;
+      if (calls.length) message.tool_calls = calls;
       return { message, finishReason, usage };
     },
   };
@@ -107,7 +108,7 @@ export function createOpenAIModel(config: OpenAIConfig = openAIConfigFromEnv()):
     async chat(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResult> {
       // include_usage：让接口在最后交回 usage。不加的话，有的模型服务在流式模式下不返回用量
       const body = { ...toRequestBody(request, config.model), stream: true, stream_options: { include_usage: true } };
-      const res = await fetch(`${config.baseURL}/chat/completions`, {
+      const res = await fetch(`${config.baseURL.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
         body: JSON.stringify(body),

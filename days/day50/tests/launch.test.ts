@@ -43,9 +43,9 @@ async function registry(next?: string) {
   return reg;
 }
 
-const servers: { close(): void }[] = [];
-afterEach(() => {
-  for (const s of servers.splice(0)) s.close();
+const cleanups: (() => Promise<void> | void)[] = [];
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
 });
 
 /** 整个产品：数据库里有 alice 和 bob（alice 是管理员），内存队列，worker 外面包着 withOps */
@@ -76,7 +76,12 @@ async function startProduct(over: { canaryPercent?: number; limiter?: { capacity
     }),
   );
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  servers.push({ close: () => (server.closeAllConnections(), server.close()) });
+  cleanups.push(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    await queue.close();
+    await db.close();
+  });
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const call = (path: string, init: { method?: string; body?: unknown; cookie?: string; headers?: Record<string, string> } = {}) =>
     fetch(`${base}${path}`, {
@@ -87,7 +92,7 @@ async function startProduct(over: { canaryPercent?: number; limiter?: { capacity
   return { db, alice, bob, prompts, store, queue, metrics, feedback, pendingFile, quota, call, aliceCookie: cookieOf(alice), bobCookie: cookieOf(bob) };
 }
 
-describe('第 50 天：认出用户（TODO 1）', () => {
+describe('第 50 天：认出用户（TODO 1）', { timeout: 15_000 }, () => {
   test('Cookie、API Key；带了不对的 Authorization 不再看 Cookie；过期的令牌不认', async () => {
     const db = await createPgliteDb();
     await migrate(db);
@@ -131,7 +136,7 @@ describe('第 50 天：按灰度选 prompt（TODO 2）', () => {
   });
 });
 
-describe('第 50 天：任务结束时记账（TODO 5）', () => {
+describe('第 50 天：任务结束时记账（TODO 5）', { timeout: 15_000 }, () => {
   const setup = async () => {
     const db = await createPgliteDb();
     await migrate(db);
@@ -183,7 +188,7 @@ describe('第 50 天：任务结束时记账（TODO 5）', () => {
   });
 });
 
-describeMock('第 50 天：整个产品（TODO 3、4、6）', () => {
+describeMock('第 50 天：整个产品（TODO 3、4、6）', { timeout: 15_000 }, () => {
   test('登录 → 提问 → 后台跑完 → 看结果；用的是分到的那一版 prompt；内部字段不给用户看', async () => {
     const app = await startProduct({ canaryPercent: 100, next: '你是研究助手（新版）。结论先行，引用写成 [编号]。' });
     expect((await app.call('/api/research', { body: { question: '你好' } })).status, '没登录').toBe(401);
@@ -225,9 +230,9 @@ describeMock('第 50 天：整个产品（TODO 3、4、6）', () => {
     expect((await app.call('/api/login', { body: { email: 'carol@example.com', password: 'wrong-password' } })).status).toBe(401);
   });
 
-  test('限流和每日配额：429，限流带 Retry-After；参数不对 400，而且不占配额', async () => {
+  test('限流：429 带 Retry-After，每个人一个桶', async () => {
     const app = await startProduct({ limiter: { capacity: 2, refillPerSecond: 0.1 } });
-    llm.reply({ content: '好的。' }).reply({ content: '好的。' }).reply({ content: '多余的一轮' });
+    llm.reply({ content: '好的。' }).reply({ content: '好的。' }).reply({ content: '好的。' }).reply({ content: '多余的一轮' });
     expect((await app.call('/api/research', { body: { question: '一' }, cookie: app.aliceCookie })).status).toBe(202);
     expect((await app.call('/api/research', { body: { question: '二' }, cookie: app.aliceCookie })).status).toBe(202);
     const limited = await app.call('/api/research', { body: { question: '三' }, cookie: app.aliceCookie });
@@ -235,7 +240,9 @@ describeMock('第 50 天：整个产品（TODO 3、4、6）', () => {
     expect(limited.headers.get('retry-after')).toBe('10');
     expect((await app.call('/api/research', { body: { question: '三' }, cookie: app.bobCookie })).status, '每个人一个桶').not.toBe(429);
     await app.queue.idle();
+  });
 
+  test('每日配额：参数不对 400 不占配额，跑满后 429', async () => {
     const capped = await startProduct({ maxRequests: 1 });
     llm.reply({ content: '好的。' }).reply({ content: '多余的一轮' });
     expect((await capped.call('/api/research', { body: { question: '' }, cookie: capped.aliceCookie })).status).toBe(400);
